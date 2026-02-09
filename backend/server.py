@@ -452,10 +452,13 @@ Chapter information:
 Write the complete content for this chapter. The text must:
 - Be approximately {word_count} words ({est_pages} pages)
 - Be professional, engaging and well-structured
-- Include subsections with clear headings (use ## for subtitles)
+- Use ## for section subtitles
+- Use **text** for bold (important words, key terms)
+- Use bullet lists with - for enumerations
 - Cover all key points mentioned
 - Include practical examples and concrete advice
-- Be suitable for an Amazon KDP published book
+- Do NOT use ### or #### or *** as separators
+- Do NOT start paragraphs with asterisks
 
 Write ONLY the chapter content, no meta-commentary."""
 
