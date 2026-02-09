@@ -382,5 +382,3 @@ export default function BookDetail() {
     </div>
   );
 }
-
-// Import at top is missing PenTool - add it
