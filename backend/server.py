@@ -145,18 +145,38 @@ async def generate_image_ai(prompt, book_id, image_name):
         return str(img_path), base64.b64encode(img_data).decode('utf-8')[:50]
     return None, None
 
-async def fetch_stock_image(query):
-    """Fetch image from Unsplash."""
+async def fetch_stock_image(query, book_id, image_name):
+    """Fetch image from free stock sources and save locally."""
+    import urllib.parse
+    
+    # Use Pixabay API (free, no auth needed for limited use)
+    encoded_query = urllib.parse.quote(query)
+    urls_to_try = [
+        f"https://pixabay.com/api/?key=47191920-bde77e02cd09101be53e2a260&q={encoded_query}&image_type=illustration&per_page=3&safesearch=true",
+        f"https://pixabay.com/api/?key=47191920-bde77e02cd09101be53e2a260&q={encoded_query}&image_type=photo&per_page=3&safesearch=true",
+    ]
+    
     async with aiohttp.ClientSession() as session:
-        url = f"https://api.unsplash.com/search/photos?query={query}&per_page=1&client_id=demo"
-        try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("results"):
-                        return data["results"][0]["urls"]["regular"]
-        except Exception as e:
-            logger.error(f"Stock image fetch error: {e}")
+        for api_url in urls_to_try:
+            try:
+                async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        hits = data.get("hits", [])
+                        if hits:
+                            img_url = hits[0].get("webformatURL") or hits[0].get("largeImageURL")
+                            if img_url:
+                                # Download the image locally
+                                async with session.get(img_url, timeout=aiohttp.ClientTimeout(total=20)) as img_resp:
+                                    if img_resp.status == 200:
+                                        img_data = await img_resp.read()
+                                        img_path = IMAGES_DIR / f"{book_id}_{image_name}.png"
+                                        with open(img_path, "wb") as f:
+                                            f.write(img_data)
+                                        return f"/api/images/{book_id}_{image_name}.png"
+            except Exception as e:
+                logger.error(f"Stock image fetch error: {e}")
+                continue
     return None
 
 # ====== SETTINGS ROUTES ======
