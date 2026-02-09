@@ -432,10 +432,13 @@ Informations du chapitre:
 Écris le contenu complet de ce chapitre. Le texte doit:
 - Faire environ {word_count} mots ({est_pages} pages)
 - Être professionnel, engageant et bien structuré
-- Inclure des sous-sections avec des titres clairs (utilise ## pour les sous-titres)
+- Utiliser ## pour les sous-titres de sections
+- Utiliser **texte** pour le gras (mots importants, termes clés)
+- Utiliser des listes à puces avec - pour les énumérations
 - Couvrir tous les points clés mentionnés
 - Inclure des exemples pratiques et des conseils concrets
-- Être adapté pour un livre publié sur Amazon KDP
+- Ne PAS utiliser ### ou #### ou *** comme séparateurs
+- Ne PAS commencer les paragraphes par des astérisques
 
 Écris UNIQUEMENT le contenu du chapitre, sans meta-commentaires."""
     else:
