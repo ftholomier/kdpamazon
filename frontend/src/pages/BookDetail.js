@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   BookOpen, Download, Loader2, ArrowLeft, Eye, Image as ImageIcon,
-  FileText, ChevronDown, ChevronUp, CheckCircle, Clock
+  FileText, ChevronDown, ChevronUp, CheckCircle, Clock, PenTool
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
