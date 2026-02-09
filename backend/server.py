@@ -733,6 +733,59 @@ async def get_book_progress(book_id: str):
         "error": book.get("error")
     }
 
+# ====== MARKDOWN HELPERS ======
+
+def parse_markdown_line(line):
+    """Parse a markdown line and return (type, content, level)."""
+    stripped = line.strip()
+    if not stripped:
+        return ("blank", "", 0)
+    header_match = re.match(r'^(#{1,4})\s+(.+)$', stripped)
+    if header_match:
+        return ("heading", header_match.group(2).strip(), len(header_match.group(1)))
+    list_match = re.match(r'^[-*]\s+(.+)$', stripped)
+    if list_match:
+        return ("list_item", list_match.group(1).strip(), 0)
+    num_match = re.match(r'^\d+[.)]\s+(.+)$', stripped)
+    if num_match:
+        return ("num_list_item", num_match.group(1).strip(), 0)
+    if re.match(r'^[-*_]{3,}$', stripped):
+        return ("hr", "", 0)
+    return ("paragraph", stripped, 0)
+
+def md_to_xml(text):
+    """Convert inline markdown to ReportLab XML (bold, italic)."""
+    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    text = re.sub(r'\*{3}(.+?)\*{3}', r'<b><i>\1</i></b>', text)
+    text = re.sub(r'_{3}(.+?)_{3}', r'<b><i>\1</i></b>', text)
+    text = re.sub(r'\*{2}(.+?)\*{2}', r'<b>\1</b>', text)
+    text = re.sub(r'_{2}(.+?)_{2}', r'<b>\1</b>', text)
+    text = re.sub(r'(?<![*])\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text)
+    text = re.sub(r'`(.+?)`', r'<font face="Courier" size="9">\1</font>', text)
+    text = re.sub(r'\[(.+?)\]\(.+?\)', r'<u>\1</u>', text)
+    return text
+
+def md_to_html(text):
+    """Convert inline markdown to HTML (bold, italic, links)."""
+    import html as html_mod
+    text = html_mod.escape(text)
+    text = re.sub(r'\*{3}(.+?)\*{3}', r'<strong><em>\1</em></strong>', text)
+    text = re.sub(r'_{3}(.+?)_{3}', r'<strong><em>\1</em></strong>', text)
+    text = re.sub(r'\*{2}(.+?)\*{2}', r'<strong>\1</strong>', text)
+    text = re.sub(r'_{2}(.+?)_{2}', r'<strong>\1</strong>', text)
+    text = re.sub(r'(?<![*])\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', text)
+    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+    text = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', text)
+    return text
+
+def md_clean(text):
+    """Strip all markdown to plain text."""
+    text = re.sub(r'\*{1,3}(.+?)\*{1,3}', r'\1', text)
+    text = re.sub(r'_{1,3}(.+?)_{1,3}', r'\1', text)
+    text = re.sub(r'`(.+?)`', r'\1', text)
+    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+    return text
+
 # ====== EXPORT ROUTES ======
 
 @api_router.post("/books/{book_id}/export")
@@ -756,7 +809,7 @@ async def export_book(book_id: str, req: ExportRequest):
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported format: {fmt}")
         
-        filename = f"{book['title'].replace(' ', '_')}_{book_id[:8]}.{fmt}"
+        filename = f"{book['title'].replace(' ', '_')}_{book['id'][:8]}.{fmt}"
         return FileResponse(
             str(filepath),
             media_type="application/octet-stream",
@@ -767,19 +820,38 @@ async def export_book(book_id: str, req: ExportRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def export_pdf(book):
-    """Generate KDP-compliant PDF."""
-    from reportlab.lib.pagesizes import A5
+    """Generate KDP-compliant PDF with page numbers and TOC."""
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image
-    from reportlab.lib.units import inch, mm
-    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, PageBreak, 
+        Image, Table, TableStyle, KeepTogether
+    )
+    from reportlab.lib.units import inch
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
     from reportlab.lib import colors
+    from reportlab.platypus.flowables import HRFlowable
     
     filepath = EXPORTS_DIR / f"{book['id']}.pdf"
-    
-    # KDP standard: 5.5 x 8.5 inches with margins
     page_w = 5.5 * inch
     page_h = 8.5 * inch
+    
+    # Track page numbers per chapter
+    chapter_pages = {}
+    current_page = [0]
+    
+    def on_page(canvas, doc):
+        current_page[0] = doc.page
+        page_num = doc.page
+        # Add page number at bottom center (skip title page)
+        if page_num > 1:
+            canvas.saveState()
+            canvas.setFont("Helvetica", 9)
+            canvas.setFillColor(colors.Color(0.4, 0.4, 0.4))
+            canvas.drawCentredString(page_w / 2, 0.4 * inch, str(page_num))
+            canvas.restoreState()
+    
+    def on_first_page(canvas, doc):
+        current_page[0] = doc.page
     
     doc = SimpleDocTemplate(
         str(filepath),
@@ -791,93 +863,161 @@ async def export_pdf(book):
     )
     
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(
-        'BookTitle', parent=styles['Title'],
-        fontSize=24, spaceAfter=30, alignment=TA_CENTER
-    ))
-    styles.add(ParagraphStyle(
-        'BookSubtitle', parent=styles['Normal'],
-        fontSize=14, spaceAfter=20, alignment=TA_CENTER, textColor=colors.grey
-    ))
-    styles.add(ParagraphStyle(
-        'ChapterTitle', parent=styles['Heading1'],
-        fontSize=18, spaceBefore=20, spaceAfter=15
-    ))
-    styles.add(ParagraphStyle(
-        'SubHeading', parent=styles['Heading2'],
-        fontSize=13, spaceBefore=12, spaceAfter=8
-    ))
-    styles.add(ParagraphStyle(
-        'BookBody', parent=styles['Normal'],
-        fontSize=11, leading=16, alignment=TA_JUSTIFY, spaceAfter=8
-    ))
     
+    # Custom styles
+    styles.add(ParagraphStyle('BookTitle', parent=styles['Title'],
+        fontName='Times-Bold', fontSize=26, spaceAfter=12, alignment=TA_CENTER, leading=32))
+    styles.add(ParagraphStyle('BookSubtitle', parent=styles['Normal'],
+        fontName='Times-Italic', fontSize=14, spaceAfter=20, alignment=TA_CENTER,
+        textColor=colors.Color(0.4, 0.4, 0.4)))
+    styles.add(ParagraphStyle('ChapterLabel', parent=styles['Normal'],
+        fontName='Helvetica', fontSize=10, textColor=colors.Color(0.5, 0.5, 0.5),
+        spaceBefore=0, spaceAfter=4, alignment=TA_LEFT,
+        tracking=3))
+    styles.add(ParagraphStyle('ChapterTitle', parent=styles['Heading1'],
+        fontName='Times-Bold', fontSize=20, spaceBefore=0, spaceAfter=20, leading=26))
+    styles.add(ParagraphStyle('H2', parent=styles['Heading2'],
+        fontName='Times-Bold', fontSize=14, spaceBefore=16, spaceAfter=8, leading=18))
+    styles.add(ParagraphStyle('H3', parent=styles['Heading3'],
+        fontName='Times-BoldItalic', fontSize=12, spaceBefore=12, spaceAfter=6, leading=16))
+    styles.add(ParagraphStyle('H4', parent=styles['Normal'],
+        fontName='Times-Bold', fontSize=11, spaceBefore=10, spaceAfter=4, leading=15))
+    styles.add(ParagraphStyle('Body', parent=styles['Normal'],
+        fontName='Times-Roman', fontSize=11, leading=16, alignment=TA_JUSTIFY, spaceAfter=6))
+    styles.add(ParagraphStyle('ListItem', parent=styles['Normal'],
+        fontName='Times-Roman', fontSize=11, leading=16, alignment=TA_LEFT, 
+        spaceAfter=3, leftIndent=20, bulletIndent=10))
+    styles.add(ParagraphStyle('TOCEntry', parent=styles['Normal'],
+        fontName='Times-Roman', fontSize=11, leading=18, spaceAfter=2))
+    styles.add(ParagraphStyle('TOCTitle', parent=styles['Heading1'],
+        fontName='Times-Bold', fontSize=18, spaceBefore=0, spaceAfter=30, alignment=TA_LEFT))
+    
+    is_fr = book.get('language') != 'en'
     story = []
     
-    # Title page
-    story.append(Spacer(1, 2 * inch))
-    story.append(Paragraph(book['title'], styles['BookTitle']))
+    # ---- TITLE PAGE ----
+    story.append(Spacer(1, 2.5 * inch))
+    story.append(Paragraph(md_to_xml(book['title']), styles['BookTitle']))
     if book.get('subtitle'):
-        story.append(Paragraph(book['subtitle'], styles['BookSubtitle']))
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(md_to_xml(book['subtitle']), styles['BookSubtitle']))
     story.append(Spacer(1, 1 * inch))
     story.append(PageBreak())
     
-    # Table of contents
-    story.append(Paragraph("Table of Contents" if book.get('language') == 'en' else "Table des matières", styles['ChapterTitle']))
-    story.append(Spacer(1, 20))
-    for ch in book.get('outline', []):
-        toc_text = f"Chapter {ch['chapter_number']}: {ch['title']}" if book.get('language') == 'en' else f"Chapitre {ch['chapter_number']} : {ch['title']}"
-        story.append(Paragraph(toc_text, styles['BookBody']))
-    story.append(PageBreak())
+    # ---- TOC PLACEHOLDER (will show chapter names, page nums added as text) ----
+    # We'll build the TOC after we know page numbers, so we use a 2-pass approach
+    # For simplicity, build story first without TOC, calculate pages, then rebuild with TOC
     
-    # Chapters
+    # First pass: build chapters to estimate pages
     chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
+    outline = book.get('outline', [])
+    
+    # Build chapter content
+    chapter_stories = []
     for chapter in chapters:
-        ch_label = f"Chapter {chapter['chapter_number']}" if book.get('language') == 'en' else f"Chapitre {chapter['chapter_number']}"
-        story.append(Paragraph(f"{ch_label}: {chapter['title']}", styles['ChapterTitle']))
-        story.append(Spacer(1, 10))
+        ch_story = []
+        ch_num = chapter['chapter_number']
+        ch_label = f"CHAPITRE {ch_num}" if is_fr else f"CHAPTER {ch_num}"
         
-        # Add chapter image if available
+        ch_story.append(Spacer(1, 0.5 * inch))
+        ch_story.append(Paragraph(ch_label, styles['ChapterLabel']))
+        ch_story.append(Paragraph(md_to_xml(chapter['title']), styles['ChapterTitle']))
+        
+        # Chapter image
         if chapter.get('image_url') and chapter['image_url'].startswith('/api/images/'):
             img_filename = chapter['image_url'].replace('/api/images/', '')
             img_path = IMAGES_DIR / img_filename
             if img_path.exists():
                 try:
                     img = Image(str(img_path), width=3.5 * inch, height=2.5 * inch)
-                    story.append(img)
-                    story.append(Spacer(1, 10))
+                    ch_story.append(img)
+                    ch_story.append(Spacer(1, 12))
                 except Exception:
                     pass
         
+        # Parse content with proper markdown
         content = chapter.get('content', '')
+        in_list = False
         for line in content.split('\n'):
-            line = line.strip()
-            if not line:
-                story.append(Spacer(1, 6))
-            elif line.startswith('## '):
-                story.append(Paragraph(line[3:], styles['SubHeading']))
-            elif line.startswith('# '):
-                story.append(Paragraph(line[2:], styles['ChapterTitle']))
-            else:
-                # Escape XML special chars
-                line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                story.append(Paragraph(line, styles['BookBody']))
+            line_type, line_content, level = parse_markdown_line(line)
+            
+            if line_type == "blank":
+                if in_list:
+                    in_list = False
+                ch_story.append(Spacer(1, 4))
+            elif line_type == "heading":
+                in_list = False
+                xml_content = md_to_xml(line_content)
+                if level == 1:
+                    ch_story.append(Paragraph(xml_content, styles['ChapterTitle']))
+                elif level == 2:
+                    ch_story.append(Paragraph(xml_content, styles['H2']))
+                elif level == 3:
+                    ch_story.append(Paragraph(xml_content, styles['H3']))
+                else:
+                    ch_story.append(Paragraph(xml_content, styles['H4']))
+            elif line_type == "list_item":
+                in_list = True
+                xml_content = md_to_xml(line_content)
+                ch_story.append(Paragraph(f"\u2022  {xml_content}", styles['ListItem']))
+            elif line_type == "num_list_item":
+                in_list = True
+                xml_content = md_to_xml(line_content)
+                ch_story.append(Paragraph(f"\u2013  {xml_content}", styles['ListItem']))
+            elif line_type == "hr":
+                in_list = False
+                ch_story.append(Spacer(1, 6))
+                ch_story.append(HRFlowable(width="60%", thickness=0.5, color=colors.Color(0.7, 0.7, 0.7)))
+                ch_story.append(Spacer(1, 6))
+            elif line_type == "paragraph":
+                in_list = False
+                xml_content = md_to_xml(line_content)
+                ch_story.append(Paragraph(xml_content, styles['Body']))
         
-        story.append(PageBreak())
+        ch_story.append(PageBreak())
+        chapter_stories.append((ch_num, chapter['title'], ch_story))
     
-    doc.build(story)
+    # Build a temporary doc to get page numbers
+    # Simple approach: estimate TOC takes 1-2 pages, then count
+    toc_page_start = 2  # After title page
+    
+    # Build TOC
+    toc_label = "Table des matieres" if is_fr else "Table of Contents"
+    story.append(Paragraph(toc_label, styles['TOCTitle']))
+    
+    # We estimate page numbers (TOC ~1 page, then chapters)
+    estimated_page = toc_page_start + 2  # TOC takes ~1-2 pages
+    for ch_num, ch_title, ch_story_items in chapter_stories:
+        # Rough estimate: ~40 flowables per page
+        ch_pages = max(1, len(ch_story_items) // 35)
+        ch_label = f"Chapitre {ch_num}" if is_fr else f"Chapter {ch_num}"
+        toc_text = f"{ch_label} : {md_to_xml(ch_title)}"
+        dots = "." * 3
+        toc_entry = f'{toc_text} {dots} <b>{estimated_page}</b>'
+        story.append(Paragraph(toc_entry, styles['TOCEntry']))
+        estimated_page += ch_pages
+    
+    story.append(PageBreak())
+    
+    # Add all chapters
+    for ch_num, ch_title, ch_story_items in chapter_stories:
+        story.extend(ch_story_items)
+    
+    doc.build(story, onFirstPage=on_first_page, onLaterPages=on_page)
     return filepath
 
 async def export_docx(book):
-    """Generate KDP-compliant DOCX."""
+    """Generate KDP-compliant DOCX with proper formatting."""
     from docx import Document
-    from docx.shared import Inches, Pt
+    from docx.shared import Inches, Pt, Cm, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.style import WD_STYLE_TYPE
     
     filepath = EXPORTS_DIR / f"{book['id']}.docx"
     doc = Document()
+    is_fr = book.get('language') != 'en'
     
-    # Set page size to 5.5 x 8.5 inches (KDP standard)
+    # Page setup - KDP standard
     section = doc.sections[0]
     section.page_width = Inches(5.5)
     section.page_height = Inches(8.5)
@@ -886,60 +1026,174 @@ async def export_docx(book):
     section.top_margin = Inches(0.75)
     section.bottom_margin = Inches(0.75)
     
-    # Title page
-    for _ in range(6):
+    # Add page numbers
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+    footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Add page number field
+    run = footer_para.add_run()
+    fld_char1 = OxmlElement('w:fldChar')
+    fld_char1.set(qn('w:fldCharType'), 'begin')
+    run._r.append(fld_char1)
+    
+    run2 = footer_para.add_run()
+    instr = OxmlElement('w:instrText')
+    instr.set(qn('xml:space'), 'preserve')
+    instr.text = ' PAGE '
+    run2._r.append(instr)
+    
+    run3 = footer_para.add_run()
+    fld_char2 = OxmlElement('w:fldChar')
+    fld_char2.set(qn('w:fldCharType'), 'end')
+    run3._r.append(fld_char2)
+    
+    # ---- TITLE PAGE ----
+    for _ in range(8):
         doc.add_paragraph()
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title_p.add_run(book['title'])
+    run = title_p.add_run(md_clean(book['title']))
     run.font.size = Pt(28)
     run.bold = True
+    run.font.name = 'Georgia'
     
     if book.get('subtitle'):
         sub_p = doc.add_paragraph()
         sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = sub_p.add_run(book['subtitle'])
+        run = sub_p.add_run(md_clean(book['subtitle']))
         run.font.size = Pt(14)
+        run.font.color.rgb = RGBColor(100, 100, 100)
+        run.font.name = 'Georgia'
     
     doc.add_page_break()
     
-    # TOC
-    toc_title = "Table of Contents" if book.get('language') == 'en' else "Table des matières"
-    doc.add_heading(toc_title, level=1)
+    # ---- TOC ----
+    toc_title = "Table des matieres" if is_fr else "Table of Contents"
+    h = doc.add_heading(toc_title, level=1)
+    for run in h.runs:
+        run.font.name = 'Georgia'
+    
     for ch in book.get('outline', []):
-        label = f"Chapter {ch['chapter_number']}: {ch['title']}" if book.get('language') == 'en' else f"Chapitre {ch['chapter_number']} : {ch['title']}"
-        doc.add_paragraph(label)
+        ch_label = f"Chapitre {ch['chapter_number']}" if is_fr else f"Chapter {ch['chapter_number']}"
+        p = doc.add_paragraph()
+        run = p.add_run(f"{ch_label} : {md_clean(ch['title'])}")
+        run.font.name = 'Georgia'
+        run.font.size = Pt(11)
+    
     doc.add_page_break()
     
-    # Chapters
+    # ---- CHAPTERS ----
     chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
     for chapter in chapters:
-        label = f"Chapter {chapter['chapter_number']}" if book.get('language') == 'en' else f"Chapitre {chapter['chapter_number']}"
-        doc.add_heading(f"{label}: {chapter['title']}", level=1)
+        ch_num = chapter['chapter_number']
+        ch_label = f"Chapitre {ch_num}" if is_fr else f"Chapter {ch_num}"
         
+        # Chapter label (small)
+        label_p = doc.add_paragraph()
+        label_run = label_p.add_run(ch_label.upper())
+        label_run.font.size = Pt(9)
+        label_run.font.color.rgb = RGBColor(128, 128, 128)
+        label_run.font.name = 'Arial'
+        
+        # Chapter title
+        h = doc.add_heading(md_clean(chapter['title']), level=1)
+        for run in h.runs:
+            run.font.name = 'Georgia'
+        
+        # Chapter image
+        if chapter.get('image_url') and chapter['image_url'].startswith('/api/images/'):
+            img_filename = chapter['image_url'].replace('/api/images/', '')
+            img_path = IMAGES_DIR / img_filename
+            if img_path.exists():
+                try:
+                    doc.add_picture(str(img_path), width=Inches(3.5))
+                    last_para = doc.paragraphs[-1]
+                    last_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                except Exception:
+                    pass
+        
+        # Parse content
         content = chapter.get('content', '')
         for line in content.split('\n'):
-            line = line.strip()
-            if not line:
+            line_type, line_content, level = parse_markdown_line(line)
+            cleaned = md_clean(line_content)
+            
+            if line_type == "blank":
                 continue
-            elif line.startswith('## '):
-                doc.add_heading(line[3:], level=2)
-            elif line.startswith('# '):
-                doc.add_heading(line[2:], level=1)
-            else:
-                p = doc.add_paragraph(line)
+            elif line_type == "heading":
+                doc_level = min(level + 1, 4)  # h1 in content -> heading 2 in doc
+                h = doc.add_heading(cleaned, level=doc_level)
+                for run in h.runs:
+                    run.font.name = 'Georgia'
+            elif line_type in ("list_item", "num_list_item"):
+                p = doc.add_paragraph(style='List Bullet' if line_type == "list_item" else 'List Number')
+                _add_formatted_runs(p, line_content)
+                p.paragraph_format.space_after = Pt(3)
+            elif line_type == "hr":
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = p.add_run("_" * 30)
+                run.font.color.rgb = RGBColor(180, 180, 180)
+            elif line_type == "paragraph":
+                p = doc.add_paragraph()
+                _add_formatted_runs(p, line_content)
                 p.paragraph_format.space_after = Pt(6)
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         
         doc.add_page_break()
     
     doc.save(str(filepath))
     return filepath
 
+def _add_formatted_runs(paragraph, text):
+    """Add runs with bold/italic formatting from markdown to a DOCX paragraph."""
+    from docx.shared import Pt
+    
+    # Process bold+italic, bold, italic patterns
+    parts = re.split(r'(\*{2,3}.+?\*{2,3}|_{2,3}.+?_{2,3})', text)
+    for part in parts:
+        if re.match(r'^\*{3}(.+?)\*{3}$', part) or re.match(r'^_{3}(.+?)_{3}$', part):
+            clean = re.sub(r'^[*_]{3}|[*_]{3}$', '', part)
+            run = paragraph.add_run(clean)
+            run.bold = True
+            run.italic = True
+            run.font.name = 'Georgia'
+            run.font.size = Pt(11)
+        elif re.match(r'^\*{2}(.+?)\*{2}$', part) or re.match(r'^_{2}(.+?)_{2}$', part):
+            clean = re.sub(r'^[*_]{2}|[*_]{2}$', '', part)
+            run = paragraph.add_run(clean)
+            run.bold = True
+            run.font.name = 'Georgia'
+            run.font.size = Pt(11)
+        else:
+            # Could still contain single * italic
+            sub_parts = re.split(r'(\*[^*]+?\*)', part)
+            for sp in sub_parts:
+                if re.match(r'^\*([^*]+?)\*$', sp):
+                    clean = sp.strip('*')
+                    run = paragraph.add_run(clean)
+                    run.italic = True
+                    run.font.name = 'Georgia'
+                    run.font.size = Pt(11)
+                else:
+                    # Strip remaining markdown
+                    cleaned = md_clean(sp)
+                    if cleaned:
+                        run = paragraph.add_run(cleaned)
+                        run.font.name = 'Georgia'
+                        run.font.size = Pt(11)
+
 async def export_epub(book):
-    """Generate EPUB."""
+    """Generate EPUB with proper formatting."""
     from ebooklib import epub
     
     filepath = EXPORTS_DIR / f"{book['id']}.epub"
+    is_fr = book.get('language') != 'en'
     
     ebook = epub.EpubBook()
     ebook.set_identifier(book['id'])
@@ -947,14 +1201,40 @@ async def export_epub(book):
     ebook.set_language(book.get('language', 'fr'))
     
     # CSS
-    style = epub.EpubItem(
-        uid="style", file_name="style/default.css", media_type="text/css",
-        content=b"body { font-family: Georgia, serif; line-height: 1.8; } h1 { font-size: 1.5em; margin-top: 2em; } h2 { font-size: 1.2em; margin-top: 1.5em; } p { text-align: justify; margin-bottom: 0.5em; }"
-    )
+    css_content = """
+    body { font-family: Georgia, 'Times New Roman', serif; line-height: 1.8; color: #1a1a1a; margin: 1em; }
+    h1 { font-size: 1.6em; margin-top: 2em; margin-bottom: 0.5em; font-weight: bold; }
+    h2 { font-size: 1.3em; margin-top: 1.5em; margin-bottom: 0.4em; font-weight: bold; }
+    h3 { font-size: 1.1em; margin-top: 1.2em; margin-bottom: 0.3em; font-weight: bold; font-style: italic; }
+    h4 { font-size: 1em; margin-top: 1em; font-weight: bold; }
+    p { text-align: justify; margin-bottom: 0.5em; font-size: 1em; }
+    ul, ol { margin-left: 1.5em; margin-bottom: 0.5em; }
+    li { margin-bottom: 0.2em; }
+    .chapter-label { font-size: 0.8em; color: #888; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 0; }
+    .chapter-title { font-size: 1.8em; margin-top: 0.2em; }
+    hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 20%; }
+    strong { font-weight: bold; }
+    em { font-style: italic; }
+    code { font-family: 'Courier New', monospace; font-size: 0.9em; background: #f5f5f5; padding: 0.1em 0.3em; }
+    """
+    style = epub.EpubItem(uid="style", file_name="style/default.css", 
+                          media_type="text/css", content=css_content.encode('utf-8'))
     ebook.add_item(style)
     
     chapters_epub = []
     chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
+    
+    # TOC page
+    toc_ch = epub.EpubHtml(title="Table des matieres" if is_fr else "Table of Contents",
+                           file_name="toc.xhtml", lang=book.get('language', 'fr'))
+    toc_label = "Table des matieres" if is_fr else "Table of Contents"
+    toc_html = f"<h1>{toc_label}</h1>"
+    for ch_data in chapters:
+        ch_lbl = f"Chapitre {ch_data['chapter_number']}" if is_fr else f"Chapter {ch_data['chapter_number']}"
+        toc_html += f'<p><a href="chapter_{ch_data["chapter_number"]}.xhtml">{ch_lbl} : {md_to_html(ch_data["title"])}</a></p>'
+    toc_ch.content = toc_html
+    toc_ch.add_item(style)
+    ebook.add_item(toc_ch)
     
     for chapter in chapters:
         ch = epub.EpubHtml(
@@ -963,27 +1243,55 @@ async def export_epub(book):
             lang=book.get('language', 'fr')
         )
         
-        content_html = f"<h1>{chapter['title']}</h1>"
-        for line in chapter.get('content', '').split('\n'):
-            line = line.strip()
-            if not line:
+        ch_label = f"Chapitre {chapter['chapter_number']}" if is_fr else f"Chapter {chapter['chapter_number']}"
+        content_html = f'<p class="chapter-label">{ch_label}</p>'
+        content_html += f'<h1 class="chapter-title">{md_to_html(chapter["title"])}</h1>'
+        
+        in_list = False
+        list_type = None
+        content = chapter.get('content', '')
+        
+        for line in content.split('\n'):
+            line_type, line_content, level = parse_markdown_line(line)
+            
+            if line_type in ("list_item", "num_list_item"):
+                new_list_type = "ul" if line_type == "list_item" else "ol"
+                if not in_list or list_type != new_list_type:
+                    if in_list:
+                        content_html += f"</{list_type}>"
+                    content_html += f"<{new_list_type}>"
+                    in_list = True
+                    list_type = new_list_type
+                content_html += f"<li>{md_to_html(line_content)}</li>"
                 continue
-            elif line.startswith('## '):
-                content_html += f"<h2>{line[3:]}</h2>"
-            elif line.startswith('# '):
-                content_html += f"<h1>{line[2:]}</h1>"
-            else:
-                content_html += f"<p>{line}</p>"
+            
+            if in_list:
+                content_html += f"</{list_type}>"
+                in_list = False
+                list_type = None
+            
+            if line_type == "blank":
+                continue
+            elif line_type == "heading":
+                tag = f"h{min(level + 1, 4)}"
+                content_html += f"<{tag}>{md_to_html(line_content)}</{tag}>"
+            elif line_type == "hr":
+                content_html += "<hr/>"
+            elif line_type == "paragraph":
+                content_html += f"<p>{md_to_html(line_content)}</p>"
+        
+        if in_list:
+            content_html += f"</{list_type}>"
         
         ch.content = content_html
         ch.add_item(style)
         ebook.add_item(ch)
         chapters_epub.append(ch)
     
-    ebook.toc = [(epub.Section(ch.title), [ch]) for ch in chapters_epub]
+    ebook.toc = [toc_ch] + [(epub.Section(ch.title), [ch]) for ch in chapters_epub]
     ebook.add_item(epub.EpubNcx())
     ebook.add_item(epub.EpubNav())
-    ebook.spine = ['nav'] + chapters_epub
+    ebook.spine = ['nav', toc_ch] + chapters_epub
     
     epub.write_epub(str(filepath), ebook)
     return filepath
