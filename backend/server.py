@@ -114,8 +114,8 @@ async def call_gemini(prompt, system_message="You are a helpful assistant.", ses
         # User's own Google key - use directly with Gemini
         chat.with_model("gemini", "gemini-2.5-flash-lite")
     else:
-        # Emergent universal key - use with Gemini
-        chat.with_model("gemini", "gemini-2.5-flash-lite")
+        # Emergent universal key - use gemini-2.5-flash (closest available)
+        chat.with_model("gemini", "gemini-2.5-flash")
     
     msg = UserMessage(text=prompt)
     response = await chat.send_message(msg)
