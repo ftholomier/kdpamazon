@@ -28,6 +28,7 @@ export const updateOutline = (bookId, outline) => api.put(`/books/${bookId}/outl
 export const generateChapter = (bookId, chapterNum) => api.post(`/books/${bookId}/generate-chapter/${chapterNum}`).then(r => r.data);
 export const generateAllChapters = (bookId) => api.post(`/books/${bookId}/generate-all-chapters`).then(r => r.data);
 export const generateChapterImage = (bookId, chapterNum) => api.post(`/books/${bookId}/generate-image/${chapterNum}`).then(r => r.data);
+export const deleteChapterImage = (bookId, chapterNum) => api.delete(`/books/${bookId}/image/${chapterNum}`).then(r => r.data);
 
 // Export
 export const exportBook = (bookId, format) => 
