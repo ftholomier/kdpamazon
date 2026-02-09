@@ -544,8 +544,9 @@ Informations du chapitre:
 - Points clés: {json.dumps(ch.get('key_points', []), ensure_ascii=False)}
 
 Écris le contenu complet de ce chapitre ({word_count} mots environ, {est_pages} pages).
-Le texte doit être professionnel, engageant, bien structuré avec des sous-sections (##).
-Inclus des exemples pratiques et des conseils concrets.
+Le texte doit être professionnel, engageant, bien structuré.
+Utilise ## pour les sous-titres, **texte** pour le gras, - pour les listes.
+Ne PAS utiliser ### ou *** comme séparateurs.
 
 Écris UNIQUEMENT le contenu du chapitre."""
                 else:
@@ -557,8 +558,9 @@ Chapter info:
 - Key points: {json.dumps(ch.get('key_points', []))}
 
 Write the complete chapter content ({word_count} words, {est_pages} pages).
-Be professional, engaging, well-structured with subsections (##).
-Include practical examples and concrete advice.
+Be professional, engaging, well-structured.
+Use ## for subtitles, **text** for bold, - for lists.
+Do NOT use ### or *** as separators.
 
 Write ONLY the chapter content."""
 
