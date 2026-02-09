@@ -118,27 +118,9 @@ async def call_gemini(prompt, system_message="You are a helpful assistant.", ses
     return response
 
 async def generate_image_ai(prompt, book_id, image_name):
-    """Generate an image using Gemini Nano Banana."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    
-    api_key, _ = await get_active_api_key()
-    
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=str(uuid.uuid4()),
-        system_message="You are an expert illustrator creating professional book illustrations."
-    )
-    chat.with_model("gemini", "gemini-3-pro-image-preview").with_params(modalities=["image", "text"])
-    
-    msg = UserMessage(text=prompt)
-    text, images = await chat.send_message_multimodal_response(msg)
-    
-    if images:
-        img_data = base64.b64decode(images[0]['data'])
-        img_path = IMAGES_DIR / f"{book_id}_{image_name}.png"
-        with open(img_path, "wb") as f:
-            f.write(img_data)
-        return str(img_path), base64.b64encode(img_data).decode('utf-8')[:50]
+    """Generate an image using AI - currently disabled, falls back to stock."""
+    # Note: AI image generation models are not available, using stock images instead
+    logger.warning(f"AI image generation not available for: {prompt}")
     return None, None
 
 async def fetch_stock_image(query):
