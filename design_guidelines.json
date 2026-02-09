@@ -1,0 +1,142 @@
+{
+  "brand_identity": {
+    "name": "Lumina Press",
+    "archetype": "The Nocturnal Editor",
+    "vibe": "Focused, Cinematic, Precise, Editorial",
+    "theme_mode": "dark",
+    "emotional_tone": "The quiet confidence of a master craftsman at midnight."
+  },
+  "typography": {
+    "font_family": {
+      "headings": "\"Fraunces\", serif",
+      "body": "\"Manrope\", sans-serif",
+      "mono": "\"JetBrains Mono\", monospace",
+      "reading": "\"Merriweather\", serif"
+    },
+    "scale": {
+      "h1": "text-5xl md:text-6xl font-light tracking-tight leading-none",
+      "h2": "text-3xl md:text-4xl font-light tracking-tight",
+      "h3": "text-2xl font-medium tracking-normal",
+      "body_lg": "text-lg leading-relaxed text-muted-foreground",
+      "body_base": "text-base leading-relaxed text-muted-foreground",
+      "caption": "text-xs font-mono tracking-widest uppercase text-muted-foreground/60"
+    },
+    "imports": [
+      "@font-face { font-family: 'Fraunces'; src: url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,100..900&display=swap'); }",
+      "@font-face { font-family: 'Manrope'; src: url('https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap'); }",
+      "@font-face { font-family: 'Merriweather'; src: url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap'); }",
+      "@font-face { font-family: 'JetBrains Mono'; src: url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap'); }"
+    ]
+  },
+  "colors": {
+    "palette": {
+      "background": "#0A0A0A",
+      "foreground": "#EDEDED",
+      "card": "#121212",
+      "card_foreground": "#FFFFFF",
+      "popover": "#161616",
+      "popover_foreground": "#EDEDED",
+      "primary": "#6366f1",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#27272a",
+      "secondary_foreground": "#E4E4E7",
+      "muted": "#1F1F22",
+      "muted_foreground": "#A1A1AA",
+      "accent": "#2a2a2e",
+      "accent_foreground": "#FAFAFA",
+      "destructive": "#7f1d1d",
+      "destructive_foreground": "#FEF2F2",
+      "border": "#27272a",
+      "input": "#27272a",
+      "ring": "#6366f1"
+    },
+    "gradients": {
+      "magic_text": "bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400",
+      "active_border": "bg-gradient-to-r from-indigo-500/50 to-purple-500/50",
+      "glass_surface": "bg-black/60 backdrop-blur-xl border border-white/10"
+    }
+  },
+  "spacing_and_layout": {
+    "container_padding": "px-6 md:px-12 lg:px-24",
+    "section_spacing": "py-24",
+    "card_padding": "p-8",
+    "grid_gap": "gap-8",
+    "max_width": "max-w-7xl mx-auto"
+  },
+  "ui_components": {
+    "buttons": {
+      "primary": "rounded-md bg-primary text-white hover:bg-primary/90 shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all duration-300 font-medium px-8 py-6",
+      "secondary": "rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-white/5 transition-all duration-300 px-6 py-6",
+      "ghost": "rounded-md hover:bg-white/5 hover:text-white text-muted-foreground transition-colors px-4 py-2"
+    },
+    "cards": {
+      "base": "rounded-xl border border-white/5 bg-card/50 backdrop-blur-sm hover:border-white/10 transition-colors duration-300",
+      "interactive": "group rounded-xl border border-white/5 bg-card/30 hover:bg-card/50 hover:border-indigo-500/30 transition-all duration-500 cursor-pointer overflow-hidden relative"
+    },
+    "inputs": {
+      "default": "bg-black/20 border-white/10 focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 rounded-lg h-12 px-4 text-base transition-all"
+    }
+  },
+  "visual_enhancers": {
+    "shadows": {
+      "glow": "shadow-[0_0_40px_-10px_rgba(99,102,241,0.2)]",
+      "glass": "shadow-[0_8px_32px_0_rgba(0,0,0,0.36)]"
+    },
+    "textures": {
+      "noise": "before:fixed before:inset-0 before:z-[-1] before:opacity-[0.03] before:bg-[url('https://grainy-gradients.vercel.app/noise.svg')] before:pointer-events-none"
+    }
+  },
+  "image_urls": {
+    "dashboard_mood": [
+      {
+        "url": "https://images.unsplash.com/photo-1549617573-95569c1aac97?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODh8MHwxfHNlYXJjaHw0fHxjcmVhdGl2ZSUyMHdyaXRlciUyMHdvcmtzcGFjZSUyMGRhcmslMjBtb29keXxlbnwwfHx8fDE3NzA2NDQ2OTl8MA&ixlib=rb-4.1.0&q=85",
+        "category": "workspace_hero",
+        "description": "Dark moody workspace with lamp and macbook, ideal for 'New Book' placeholder or dashboard hero"
+      }
+    ],
+    "book_covers_placeholder": [
+      {
+        "url": "https://images.unsplash.com/photo-1621249153915-1098c2c35f37?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwzfHxtaW5pbWFsaXN0JTIwYm9vayUyMGNvdmVyJTIwYWJzdHJhY3QlMjBhcnR8ZW58MHx8fHwxNzcwNjQ0Njk5fDA&ixlib=rb-4.1.0&q=85",
+        "category": "cover_art",
+        "description": "Abstract minimalist round shapes, soft pink/grey"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1761156254622-7b66649b1f69?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwyfHxtaW5pbWFsaXN0JTIwYm9vayUyMGNvdmVyJTIwYWJzdHJhY3QlMjBhcnR8ZW58MHx8fHwxNzcwNjQ0Njk5fDA&ixlib=rb-4.1.0&q=85",
+        "category": "cover_art",
+        "description": "Geometric white shapes, structural"
+      }
+    ]
+  },
+  "layout_strategies": {
+    "dashboard_bento": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6 auto-rows-[minmax(180px,auto)]",
+    "writing_pipeline": "max-w-4xl mx-auto space-y-12",
+    "preview_spread": "flex flex-col md:flex-row gap-0 shadow-2xl rounded-sm overflow-hidden border border-white/5"
+  },
+  "instructions_to_main_agent": {
+    "general": [
+      "Use 'Fraunces' font for all H1, H2 and main impactful headers. Use 'Manrope' for UI text.",
+      "The theme is STRICTLY DARK. Do not implement a light mode toggle unless explicitly asked later. The 'Publisher' vibe relies on this dark, focus-heavy aesthetic.",
+      "Use the 'noise' texture class on the main app container to give it that film/paper grain feel.",
+      "For the 'Book Preview' component, use 'Merriweather' font and a slightly off-white (cream) background if showing a 'page', or keep it dark mode if showing the 'interface' of the page.",
+      "Buttons should have generous padding (py-6) to feel tactile and substantial."
+    ],
+    "component_overrides": {
+      "Card": "Remove default shadow, add 1px border-white/5. On hover, darken border to border-white/20.",
+      "Input": "Background transparent or black/20. Border bottom only for a 'form' feel, or full border for standard inputs.",
+      "Button": "Avoid rounded-full unless it's a small icon button. Use rounded-md or rounded-lg."
+    }
+  },
+  "universal_guidelines": {
+    "do_not": [
+      "DO NOT use gradients for backgrounds of large sections. Use solid colors + noise.",
+      "DO NOT use generic 'Inter' font.",
+      "DO NOT center text unless it is a hero headline."
+    ],
+    "must_do": [
+      "MUST use data-testid for all interactive elements.",
+      "MUST implement bilingual support placeholders (French/English) structure.",
+      "MUST use 'sonner' for toasts.",
+      "MUST ensure contrast ratios are accessible even in dark mode."
+    ]
+  }
+}
