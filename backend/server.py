@@ -97,7 +97,7 @@ async def get_active_api_key():
     return os.environ.get('EMERGENT_LLM_KEY', ''), "emergent"
 
 async def call_gemini(prompt, system_message="You are a helpful assistant.", session_id=None):
-    """Call Gemini 2.5 Flash Lite via emergentintegrations."""
+    """Call LLM via emergentintegrations - using working OpenAI model."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     api_key, key_type = await get_active_api_key()
@@ -110,10 +110,8 @@ async def call_gemini(prompt, system_message="You are a helpful assistant.", ses
         system_message=system_message
     )
     
-    if key_type == "gemini":
-        chat.with_model("gemini", "gemini-2.5-flash-lite")
-    else:
-        chat.with_model("gemini", "gemini-2.5-flash-lite")
+    # Use working OpenAI model since Gemini models are not available
+    chat.with_model("openai", "gpt-4o")
     
     msg = UserMessage(text=prompt)
     response = await chat.send_message(msg)
