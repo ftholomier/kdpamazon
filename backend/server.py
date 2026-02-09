@@ -622,7 +622,7 @@ async def generate_chapter_image(book_id: str, chapter_num: int):
             logger.error(f"AI image generation failed: {e}")
     
     if not image_url and image_source in ("stock", "both"):
-        stock_url = await fetch_stock_image(suggestion)
+        stock_url = await fetch_stock_image(suggestion, book_id, f"ch{chapter_num}")
         if stock_url:
             image_url = stock_url
     
@@ -638,6 +638,31 @@ async def generate_chapter_image(book_id: str, chapter_num: int):
         )
     
     return {"image_url": image_url}
+
+@api_router.delete("/books/{book_id}/image/{chapter_num}")
+async def delete_chapter_image(book_id: str, chapter_num: int):
+    book = await db.books.find_one({"id": book_id}, {"_id": 0})
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    chapters = book.get("chapters", [])
+    for i, c in enumerate(chapters):
+        if c.get("chapter_number") == chapter_num:
+            old_url = c.get("image_url", "")
+            chapters[i]["image_url"] = None
+            # Delete local file if it exists
+            if old_url and old_url.startswith("/api/images/"):
+                img_filename = old_url.replace("/api/images/", "")
+                img_path = IMAGES_DIR / img_filename
+                if img_path.exists():
+                    img_path.unlink()
+            break
+    
+    await db.books.update_one(
+        {"id": book_id},
+        {"$set": {"chapters": chapters, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"status": "deleted"}
 
 @api_router.get("/images/{filename}")
 async def serve_image(filename: str):
