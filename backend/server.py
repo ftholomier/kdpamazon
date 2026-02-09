@@ -685,6 +685,31 @@ async def get_book(book_id: str):
 
 @api_router.delete("/books/{book_id}")
 async def delete_book(book_id: str):
+    book = await db.books.find_one({"id": book_id}, {"_id": 0})
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    # Delete associated images
+    for ch in book.get("chapters", []):
+        img_url = ch.get("image_url", "")
+        if img_url and img_url.startswith("/api/images/"):
+            img_filename = img_url.replace("/api/images/", "")
+            img_path = IMAGES_DIR / img_filename
+            if img_path.exists():
+                try:
+                    img_path.unlink()
+                except Exception:
+                    pass
+    
+    # Delete export files
+    for ext in ["pdf", "docx", "epub"]:
+        export_path = EXPORTS_DIR / f"{book_id}.{ext}"
+        if export_path.exists():
+            try:
+                export_path.unlink()
+            except Exception:
+                pass
+    
     result = await db.books.delete_one({"id": book_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Book not found")
