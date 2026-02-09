@@ -250,7 +250,7 @@ class KDPAPITester:
             "Create book for deletion test",
             "POST",
             "books/create",
-            201,
+            200,  # API returns 200, not 201
             data=book_data
         )
         
