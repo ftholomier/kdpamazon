@@ -9,6 +9,7 @@ import uuid
 import json
 import asyncio
 import base64
+import re
 import aiohttp
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
