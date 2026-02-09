@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   BookOpen, Download, Loader2, ArrowLeft, Eye, Image as ImageIcon,
-  FileText, ChevronDown, ChevronUp, CheckCircle, Clock, PenTool
+  FileText, ChevronDown, ChevronUp, CheckCircle, PenTool, Trash2, RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,8 +14,17 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import {
-  getBook, getBookProgress, generateChapter, generateChapterImage, exportBook
+  getBook, getBookProgress, generateChapter, generateChapterImage,
+  deleteChapterImage, exportBook
 } from "@/lib/api";
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+
+function getImageSrc(imageUrl) {
+  if (!imageUrl) return null;
+  if (imageUrl.startsWith("/api")) return `${BACKEND_URL}${imageUrl}`;
+  return imageUrl;
+}
 
 export default function BookDetail() {
   const { bookId } = useParams();
@@ -25,6 +34,7 @@ export default function BookDetail() {
   const [exporting, setExporting] = useState(false);
   const [generatingChapter, setGeneratingChapter] = useState(null);
   const [generatingImage, setGeneratingImage] = useState(null);
+  const [deletingImage, setDeletingImage] = useState(null);
   const [expandedChapter, setExpandedChapter] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
 
@@ -44,7 +54,6 @@ export default function BookDetail() {
     fetchBook();
   }, [fetchBook]);
 
-  // Poll progress if writing
   useEffect(() => {
     if (!book || book.status !== "writing") return;
     const interval = setInterval(async () => {
@@ -89,6 +98,19 @@ export default function BookDetail() {
     }
   };
 
+  const handleDeleteImage = async (chapterNum) => {
+    setDeletingImage(chapterNum);
+    try {
+      await deleteChapterImage(bookId, chapterNum);
+      await fetchBook();
+      toast.success("Image removed");
+    } catch (err) {
+      toast.error("Failed to delete image");
+    } finally {
+      setDeletingImage(null);
+    }
+  };
+
   const handleExport = async (format) => {
     setExporting(true);
     try {
@@ -123,6 +145,7 @@ export default function BookDetail() {
   const chapters = (book.chapters || []).sort((a, b) => a.chapter_number - b.chapter_number);
   const outline = book.outline || [];
   const progress = chapters.length / Math.max(outline.length, 1);
+  const is_fr = book.language === "fr";
 
   // Book preview mode
   if (previewMode) {
@@ -136,10 +159,9 @@ export default function BookDetail() {
             data-testid="exit-preview-btn"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Exit Preview
+            {is_fr ? "Quitter l'apercu" : "Exit Preview"}
           </Button>
 
-          {/* Book pages */}
           <div className="book-page rounded-lg p-12 shadow-2xl mb-8" data-testid="book-preview-title-page">
             <div className="text-center py-20">
               <h1 className="text-3xl font-bold text-gray-900 mb-4" style={{ fontFamily: "'Fraunces', serif" }}>
@@ -157,13 +179,16 @@ export default function BookDetail() {
               className="book-page rounded-lg p-12 shadow-2xl mb-4"
               data-testid={`preview-chapter-${ch.chapter_number}`}
             >
+              <p className="text-xs uppercase tracking-widest text-gray-400 mb-2">
+                {is_fr ? `Chapitre ${ch.chapter_number}` : `Chapter ${ch.chapter_number}`}
+              </p>
               <h1 className="text-2xl font-bold text-gray-900 mb-6" style={{ fontFamily: "'Fraunces', serif" }}>
-                {book.language === "fr" ? `Chapitre ${ch.chapter_number}` : `Chapter ${ch.chapter_number}`}: {ch.title}
+                {ch.title}
               </h1>
               {ch.image_url && (
                 <div className="mb-6 flex justify-center">
                   <img
-                    src={ch.image_url.startsWith("/api") ? `${process.env.REACT_APP_BACKEND_URL}${ch.image_url}` : ch.image_url}
+                    src={getImageSrc(ch.image_url)}
                     alt={ch.title}
                     className="max-w-full h-auto rounded-lg max-h-64 object-cover"
                   />
@@ -173,9 +198,24 @@ export default function BookDetail() {
                 {ch.content?.split("\n").map((line, i) => {
                   const trimmed = line.trim();
                   if (!trimmed) return <br key={i} />;
-                  if (trimmed.startsWith("## ")) return <h2 key={i} className="text-xl font-semibold text-gray-800 mt-6 mb-3" style={{ fontFamily: "'Fraunces', serif" }}>{trimmed.slice(3)}</h2>;
-                  if (trimmed.startsWith("# ")) return <h1 key={i} className="text-2xl font-bold text-gray-900 mt-8 mb-4" style={{ fontFamily: "'Fraunces', serif" }}>{trimmed.slice(2)}</h1>;
-                  return <p key={i} className="text-gray-700 leading-relaxed mb-3 text-justify">{trimmed}</p>;
+                  if (/^#{1,4}\s/.test(trimmed)) {
+                    const level = trimmed.match(/^(#{1,4})/)[1].length;
+                    const text = trimmed.replace(/^#{1,4}\s+/, "");
+                    const sizes = { 1: "text-2xl", 2: "text-xl", 3: "text-lg", 4: "text-base" };
+                    return <h2 key={i} className={`${sizes[level] || "text-lg"} font-semibold text-gray-800 mt-6 mb-3`} style={{ fontFamily: "'Fraunces', serif" }}>{text}</h2>;
+                  }
+                  if (/^[-*]\s/.test(trimmed)) {
+                    return <li key={i} className="text-gray-700 ml-6 list-disc">{trimmed.replace(/^[-*]\s+/, "")}</li>;
+                  }
+                  if (/^\d+[.)]\s/.test(trimmed)) {
+                    return <li key={i} className="text-gray-700 ml-6 list-decimal">{trimmed.replace(/^\d+[.)]\s+/, "")}</li>;
+                  }
+                  // Parse inline bold/italic
+                  const html = trimmed
+                    .replace(/\*{3}(.+?)\*{3}/g, "<strong><em>$1</em></strong>")
+                    .replace(/\*{2}(.+?)\*{2}/g, "<strong>$1</strong>")
+                    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>");
+                  return <p key={i} className="text-gray-700 leading-relaxed mb-3 text-justify" dangerouslySetInnerHTML={{ __html: html }} />;
                 })}
               </div>
             </div>
@@ -213,7 +253,7 @@ export default function BookDetail() {
               {book.language === "fr" ? "FR" : "EN"}
             </Badge>
             <Badge variant="outline" className="text-xs font-mono text-white/40 border-white/10">
-              {chapters.length} / {outline.length} chapters
+              {chapters.length} / {outline.length} {is_fr ? "chapitres" : "chapters"}
             </Badge>
           </div>
         </div>
@@ -228,7 +268,7 @@ export default function BookDetail() {
                 className="border-white/10 text-white/60 hover:bg-white/5 h-10"
               >
                 <Eye className="w-4 h-4 mr-2" />
-                Preview
+                {is_fr ? "Apercu" : "Preview"}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -266,7 +306,7 @@ export default function BookDetail() {
       {outline.length > 0 && (
         <Card className="rounded-xl border border-white/5 bg-[#121212]/50 p-6 mb-8" data-testid="book-progress-card">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-white/60">Writing Progress</span>
+            <span className="text-sm text-white/60">{is_fr ? "Progression de l'ecriture" : "Writing Progress"}</span>
             <span className="text-sm font-mono text-indigo-400">{Math.round(progress * 100)}%</span>
           </div>
           <Progress value={progress * 100} className="h-2" />
@@ -279,6 +319,7 @@ export default function BookDetail() {
           const chapter = chapters.find((c) => c.chapter_number === outlineCh.chapter_number);
           const isExpanded = expandedChapter === outlineCh.chapter_number;
           const isGenerated = !!chapter;
+          const hasImage = chapter?.image_url;
 
           return (
             <Card
@@ -286,6 +327,7 @@ export default function BookDetail() {
               className="rounded-xl border border-white/5 bg-[#121212]/50 overflow-hidden"
               data-testid={`chapter-item-${outlineCh.chapter_number}`}
             >
+              {/* Chapter header row */}
               <div
                 className="flex items-center justify-between p-5 cursor-pointer hover:bg-white/[0.02] transition-colors"
                 onClick={() => setExpandedChapter(isExpanded ? null : outlineCh.chapter_number)}
@@ -298,14 +340,22 @@ export default function BookDetail() {
                       <span className="text-xs font-mono text-white/30">{outlineCh.chapter_number}</span>
                     )}
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <h4 className="text-white text-sm font-medium">{outlineCh.title}</h4>
                     <p className="text-white/30 text-xs">~{outlineCh.estimated_pages} pages</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {chapter?.image_url && (
-                    <ImageIcon className="w-4 h-4 text-indigo-400" />
+                <div className="flex items-center gap-3">
+                  {/* Show image thumbnail inline */}
+                  {hasImage && (
+                    <img
+                      src={getImageSrc(chapter.image_url)}
+                      alt=""
+                      className="w-10 h-10 rounded object-cover border border-white/10"
+                    />
+                  )}
+                  {isGenerated && !hasImage && (
+                    <span className="text-[10px] text-white/20 font-mono">{is_fr ? "pas d'image" : "no image"}</span>
                   )}
                   {isExpanded ? (
                     <ChevronUp className="w-4 h-4 text-white/30" />
@@ -315,24 +365,90 @@ export default function BookDetail() {
                 </div>
               </div>
 
+              {/* Expanded content */}
               {isExpanded && (
                 <div className="border-t border-white/5 p-5">
                   {isGenerated ? (
                     <>
+                      {/* Image section - visible in interface */}
+                      {hasImage && (
+                        <div className="mb-6 p-4 rounded-lg bg-black/30 border border-white/5" data-testid={`chapter-image-${outlineCh.chapter_number}`}>
+                          <div className="flex items-start gap-4">
+                            <img
+                              src={getImageSrc(chapter.image_url)}
+                              alt={chapter.title}
+                              className="w-48 h-32 rounded-lg object-cover border border-white/10"
+                            />
+                            <div className="flex-1">
+                              <p className="text-xs font-mono text-white/40 mb-3">
+                                {is_fr ? "Illustration du chapitre" : "Chapter illustration"}
+                              </p>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => { e.stopPropagation(); handleGenerateImage(outlineCh.chapter_number); }}
+                                  disabled={generatingImage === outlineCh.chapter_number}
+                                  data-testid={`regenerate-image-ch-${outlineCh.chapter_number}`}
+                                  className="border-white/10 text-white/50 hover:bg-white/5 text-xs"
+                                >
+                                  {generatingImage === outlineCh.chapter_number ? (
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="w-3 h-3 mr-1" />
+                                  )}
+                                  {is_fr ? "Nouvelle image" : "New image"}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteImage(outlineCh.chapter_number); }}
+                                  disabled={deletingImage === outlineCh.chapter_number}
+                                  data-testid={`delete-image-ch-${outlineCh.chapter_number}`}
+                                  className="border-white/10 text-red-400/60 hover:bg-red-500/10 hover:text-red-400 text-xs"
+                                >
+                                  {deletingImage === outlineCh.chapter_number ? (
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                  )}
+                                  {is_fr ? "Supprimer" : "Delete"}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Chapter content preview */}
                       <ScrollArea className="max-h-96 mb-4">
                         <div className="prose prose-sm prose-invert max-w-none">
                           {chapter.content?.split("\n").slice(0, 30).map((line, i) => {
                             const trimmed = line.trim();
                             if (!trimmed) return <br key={i} />;
-                            if (trimmed.startsWith("## ")) return <h3 key={i} className="text-white/80 text-sm font-semibold mt-4 mb-2">{trimmed.slice(3)}</h3>;
-                            return <p key={i} className="text-white/50 text-sm leading-relaxed mb-2">{trimmed}</p>;
+                            if (/^#{1,4}\s/.test(trimmed)) {
+                              const text = trimmed.replace(/^#{1,4}\s+/, "");
+                              return <h3 key={i} className="text-white/80 text-sm font-semibold mt-4 mb-2">{text}</h3>;
+                            }
+                            if (/^[-*]\s/.test(trimmed)) {
+                              return <li key={i} className="text-white/50 text-sm ml-4 list-disc">{trimmed.replace(/^[-*]\s+/, "")}</li>;
+                            }
+                            // Clean inline markdown for display
+                            const cleaned = trimmed
+                              .replace(/\*{2,3}(.+?)\*{2,3}/g, "$1")
+                              .replace(/\*(.+?)\*/g, "$1");
+                            return <p key={i} className="text-white/50 text-sm leading-relaxed mb-2">{cleaned}</p>;
                           })}
                           {chapter.content?.split("\n").length > 30 && (
-                            <p className="text-indigo-400 text-sm mt-4">... click Preview to read full chapter</p>
+                            <p className="text-indigo-400 text-sm mt-4">
+                              {is_fr ? "... cliquez sur Apercu pour lire le chapitre complet" : "... click Preview to read full chapter"}
+                            </p>
                           )}
                         </div>
                       </ScrollArea>
-                      {!chapter.image_url && (
+
+                      {/* Generate image button if no image */}
+                      {!hasImage && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -346,7 +462,7 @@ export default function BookDetail() {
                           ) : (
                             <ImageIcon className="w-3 h-3 mr-2" />
                           )}
-                          Generate Image
+                          {is_fr ? "Generer une image" : "Generate Image"}
                         </Button>
                       )}
                     </>
@@ -362,12 +478,12 @@ export default function BookDetail() {
                         {generatingChapter === outlineCh.chapter_number ? (
                           <>
                             <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                            Generating...
+                            {is_fr ? "Generation..." : "Generating..."}
                           </>
                         ) : (
                           <>
                             <PenTool className="w-3 h-3 mr-2" />
-                            Generate Chapter
+                            {is_fr ? "Generer le chapitre" : "Generate Chapter"}
                           </>
                         )}
                       </Button>
