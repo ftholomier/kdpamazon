@@ -150,34 +150,39 @@ async def fetch_stock_image(query, book_id, image_name):
     """Fetch image from free stock sources and save locally."""
     import urllib.parse
     
-    # Use Pixabay API (free, no auth needed for limited use)
     encoded_query = urllib.parse.quote(query)
-    urls_to_try = [
-        f"https://pixabay.com/api/?key=47191920-bde77e02cd09101be53e2a260&q={encoded_query}&image_type=illustration&per_page=3&safesearch=true",
-        f"https://pixabay.com/api/?key=47191920-bde77e02cd09101be53e2a260&q={encoded_query}&image_type=photo&per_page=3&safesearch=true",
-    ]
+    
+    # Use Unsplash Source (no API key needed) - downloads directly
+    unsplash_url = f"https://source.unsplash.com/800x600/?{encoded_query}"
     
     async with aiohttp.ClientSession() as session:
-        for api_url in urls_to_try:
-            try:
-                async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        hits = data.get("hits", [])
-                        if hits:
-                            img_url = hits[0].get("webformatURL") or hits[0].get("largeImageURL")
-                            if img_url:
-                                # Download the image locally
-                                async with session.get(img_url, timeout=aiohttp.ClientTimeout(total=20)) as img_resp:
-                                    if img_resp.status == 200:
-                                        img_data = await img_resp.read()
-                                        img_path = IMAGES_DIR / f"{book_id}_{image_name}.png"
-                                        with open(img_path, "wb") as f:
-                                            f.write(img_data)
-                                        return f"/api/images/{book_id}_{image_name}.png"
-            except Exception as e:
-                logger.error(f"Stock image fetch error: {e}")
-                continue
+        try:
+            # Unsplash Source redirects to an actual image
+            async with session.get(unsplash_url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True) as resp:
+                if resp.status == 200 and 'image' in resp.content_type:
+                    img_data = await resp.read()
+                    if len(img_data) > 1000:  # Ensure we got a real image
+                        img_path = IMAGES_DIR / f"{book_id}_{image_name}.png"
+                        with open(img_path, "wb") as f:
+                            f.write(img_data)
+                        return f"/api/images/{book_id}_{image_name}.png"
+        except Exception as e:
+            logger.error(f"Unsplash fetch error: {e}")
+        
+        # Fallback: Use Lorem Picsum (always works)
+        try:
+            picsum_url = f"https://picsum.photos/800/600"
+            async with session.get(picsum_url, timeout=aiohttp.ClientTimeout(total=15), allow_redirects=True) as resp:
+                if resp.status == 200:
+                    img_data = await resp.read()
+                    if len(img_data) > 1000:
+                        img_path = IMAGES_DIR / f"{book_id}_{image_name}.png"
+                        with open(img_path, "wb") as f:
+                            f.write(img_data)
+                        return f"/api/images/{book_id}_{image_name}.png"
+        except Exception as e:
+            logger.error(f"Picsum fetch error: {e}")
+    
     return None
 
 # ====== SETTINGS ROUTES ======
