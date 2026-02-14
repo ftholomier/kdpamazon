@@ -829,6 +829,32 @@ def md_clean(text):
     text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
     return text
 
+def strip_chapter_title_from_content(content, chapter_title):
+    """Remove the first heading if it matches or is similar to the chapter title."""
+    lines = content.split('\n')
+    clean_title = md_clean(chapter_title).strip().lower()
+    
+    # Find and remove leading blank lines, then check first heading
+    start_idx = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            start_idx = i + 1
+            continue
+        # Check if it's a heading matching the chapter title
+        header_match = re.match(r'^#{1,4}\s+(.+)$', stripped)
+        if header_match:
+            heading_text = md_clean(header_match.group(1)).strip().lower()
+            # Check similarity (contains or is very similar)
+            if heading_text == clean_title or clean_title in heading_text or heading_text in clean_title:
+                start_idx = i + 1
+                # Also skip blank line after removed heading
+                if start_idx < len(lines) and not lines[start_idx].strip():
+                    start_idx += 1
+        break
+    
+    return '\n'.join(lines[start_idx:])
+
 # ====== EXPORT ROUTES ======
 
 @api_router.post("/books/{book_id}/export")
