@@ -239,7 +239,8 @@ export default function BookDetail() {
                 })}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
