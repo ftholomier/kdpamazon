@@ -169,13 +169,13 @@ def main():
         return 1
 
     # Test 2: PDF Export (most critical - 2-pass build with real page numbers)
-    pdf_success = tester.test_export_pdf(book_id)
+    pdf_success, _ = tester.test_export_pdf(book_id)
     
     # Test 3: DOCX Export (with TOC page numbers)
-    docx_success = tester.test_export_docx(book_id)
+    docx_success, _ = tester.test_export_docx(book_id)
     
     # Test 4: EPUB Export
-    epub_success = tester.test_export_epub(book_id)
+    epub_success, _ = tester.test_export_epub(book_id)
     
     # Test 5: Test delete image endpoint on a chapter that has an image
     chapters_with_images = [ch for ch in chapters if ch.get('image_url')]
