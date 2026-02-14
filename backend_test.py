@@ -192,7 +192,7 @@ def main():
     image_gen_success = True
     if chapters_without_images:
         test_chapter = chapters_without_images[0]['chapter_number']
-        image_gen_success = tester.test_generate_image_with_stock_query_check(book_id, test_chapter)
+        image_gen_success, _ = tester.test_generate_image_with_stock_query_check(book_id, test_chapter)
         
         # Give the backend a moment to log
         time.sleep(2)
