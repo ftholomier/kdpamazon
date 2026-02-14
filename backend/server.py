@@ -889,77 +889,77 @@ async def export_book(book_id: str, req: ExportRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def export_pdf(book):
-    """Generate KDP-compliant PDF with real page numbers, 2-pass TOC, chapter title pages."""
+    """Generate KDP-compliant PDF with accurate page numbers and TOC."""
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, PageBreak, 
-        Image, Table, TableStyle, KeepTogether
+        BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer, 
+        PageBreak, Image, Table, TableStyle, Flowable
     )
     from reportlab.lib.units import inch
     from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
     from reportlab.lib import colors
     from reportlab.platypus.flowables import HRFlowable
     from io import BytesIO
-    import copy
     
     filepath = EXPORTS_DIR / f"{book['id']}.pdf"
     page_w = 5.5 * inch
     page_h = 8.5 * inch
-    content_w = page_w - 0.75 * inch - 0.5 * inch  # left + right margin
+    left_m = 0.75 * inch
+    right_m = 0.5 * inch
+    top_m = 0.75 * inch
+    bottom_m = 0.75 * inch
+    content_w = page_w - left_m - right_m
     
     is_fr = book.get('language') != 'en'
     chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
     
+    # ---- Styles ----
     def make_styles():
-        styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle('BookTitle', parent=styles['Title'],
-            fontName='Times-Bold', fontSize=28, spaceAfter=12, alignment=TA_CENTER, leading=34))
-        styles.add(ParagraphStyle('BookSubtitle', parent=styles['Normal'],
-            fontName='Times-Italic', fontSize=14, spaceAfter=20, alignment=TA_CENTER,
-            textColor=colors.Color(0.4, 0.4, 0.4)))
-        styles.add(ParagraphStyle('ChapterLabel', parent=styles['Normal'],
-            fontName='Helvetica', fontSize=11, textColor=colors.Color(0.45, 0.45, 0.45),
-            spaceBefore=0, spaceAfter=8, alignment=TA_CENTER))
-        styles.add(ParagraphStyle('ChapterTitlePage', parent=styles['Heading1'],
-            fontName='Times-Bold', fontSize=22, spaceBefore=0, spaceAfter=0, 
-            leading=28, alignment=TA_CENTER))
-        styles.add(ParagraphStyle('H2', parent=styles['Heading2'],
-            fontName='Times-Bold', fontSize=14, spaceBefore=16, spaceAfter=8, leading=18))
-        styles.add(ParagraphStyle('H3', parent=styles['Heading3'],
-            fontName='Times-BoldItalic', fontSize=12, spaceBefore=12, spaceAfter=6, leading=16))
-        styles.add(ParagraphStyle('H4', parent=styles['Normal'],
-            fontName='Times-Bold', fontSize=11, spaceBefore=10, spaceAfter=4, leading=15))
-        styles.add(ParagraphStyle('Body', parent=styles['Normal'],
-            fontName='Times-Roman', fontSize=11, leading=16, alignment=TA_JUSTIFY, spaceAfter=6))
-        styles.add(ParagraphStyle('ListItem', parent=styles['Normal'],
-            fontName='Times-Roman', fontSize=11, leading=16, alignment=TA_LEFT, 
-            spaceAfter=3, leftIndent=24, bulletIndent=12))
-        styles.add(ParagraphStyle('TOCTitle', parent=styles['Heading1'],
-            fontName='Times-Bold', fontSize=20, spaceBefore=0, spaceAfter=30, alignment=TA_CENTER))
-        styles.add(ParagraphStyle('TOCLeft', parent=styles['Normal'],
-            fontName='Times-Roman', fontSize=11, leading=20))
-        styles.add(ParagraphStyle('TOCRight', parent=styles['Normal'],
-            fontName='Times-Roman', fontSize=11, leading=20, alignment=TA_RIGHT))
-        styles.add(ParagraphStyle('TOCDots', parent=styles['Normal'],
-            fontName='Times-Roman', fontSize=11, leading=20, alignment=TA_LEFT,
-            textColor=colors.Color(0.6, 0.6, 0.6)))
-        return styles
+        s = getSampleStyleSheet()
+        s.add(ParagraphStyle('BookTitle', fontName='Times-Bold', fontSize=28,
+            alignment=TA_CENTER, leading=34, spaceAfter=12))
+        s.add(ParagraphStyle('BookSubtitle', fontName='Times-Italic', fontSize=14,
+            alignment=TA_CENTER, textColor=colors.Color(0.4, 0.4, 0.4), spaceAfter=20))
+        s.add(ParagraphStyle('ChapLabel', fontName='Helvetica', fontSize=11,
+            textColor=colors.Color(0.45, 0.45, 0.45), alignment=TA_CENTER, spaceAfter=8))
+        s.add(ParagraphStyle('ChapTitlePage', fontName='Times-Bold', fontSize=22,
+            alignment=TA_CENTER, leading=28))
+        s.add(ParagraphStyle('H2', fontName='Times-Bold', fontSize=14,
+            spaceBefore=16, spaceAfter=8, leading=18))
+        s.add(ParagraphStyle('H3', fontName='Times-BoldItalic', fontSize=12,
+            spaceBefore=12, spaceAfter=6, leading=16))
+        s.add(ParagraphStyle('H4', fontName='Times-Bold', fontSize=11,
+            spaceBefore=10, spaceAfter=4, leading=15))
+        s.add(ParagraphStyle('Body', fontName='Times-Roman', fontSize=11,
+            leading=16, alignment=TA_JUSTIFY, spaceAfter=6))
+        s.add(ParagraphStyle('ListItem', fontName='Times-Roman', fontSize=11,
+            leading=16, spaceAfter=3, leftIndent=24, bulletIndent=12))
+        s.add(ParagraphStyle('TOCTitle', fontName='Times-Bold', fontSize=20,
+            spaceAfter=30, alignment=TA_CENTER))
+        s.add(ParagraphStyle('TOCLeft', fontName='Times-Roman', fontSize=11, leading=20))
+        s.add(ParagraphStyle('TOCRight', fontName='Times-Roman', fontSize=11,
+            leading=20, alignment=TA_RIGHT))
+        return s
     
-    def add_page_number(canvas, doc):
-        if doc.page > 1:
-            canvas.saveState()
-            canvas.setFont("Helvetica", 9)
-            canvas.setFillColor(colors.Color(0.4, 0.4, 0.4))
-            canvas.drawCentredString(page_w / 2, 0.4 * inch, str(doc.page))
-            canvas.restoreState()
+    # ---- Chapter marker flowable ----
+    class ChapterMark(Flowable):
+        """Invisible flowable that records which page a chapter starts on."""
+        width = 0
+        height = 0
+        def __init__(self, ch_num, tracker_dict):
+            Flowable.__init__(self)
+            self.ch_num = ch_num
+            self.tracker_dict = tracker_dict
+        def draw(self):
+            self.tracker_dict[self.ch_num] = self.canv.getPageNumber()
+        def wrap(self, aW, aH):
+            return (0, 0)
     
-    def build_chapter_content(chapter, styles):
-        """Build flowables for a single chapter's content (no title page)."""
+    # ---- Build chapter content flowables ----
+    def build_chapter_body(chapter, styles):
         flowables = []
         content = strip_chapter_title_from_content(
             chapter.get('content', ''), chapter.get('title', ''))
-        
-        # Chapter image
         if chapter.get('image_url') and chapter['image_url'].startswith('/api/images/'):
             img_filename = chapter['image_url'].replace('/api/images/', '')
             img_path = IMAGES_DIR / img_filename
@@ -971,198 +971,131 @@ async def export_pdf(book):
                     flowables.append(Spacer(1, 14))
                 except Exception:
                     pass
-        
-        in_list = False
         for line in content.split('\n'):
-            line_type, line_content, level = parse_markdown_line(line)
-            
-            if line_type == "blank":
-                if in_list:
-                    in_list = False
+            lt, lc, lv = parse_markdown_line(line)
+            if lt == "blank":
                 flowables.append(Spacer(1, 4))
-            elif line_type == "heading":
-                in_list = False
-                xml_content = md_to_xml(line_content)
-                if level <= 1:
-                    flowables.append(Paragraph(xml_content, styles['H2']))
-                elif level == 2:
-                    flowables.append(Paragraph(xml_content, styles['H2']))
-                elif level == 3:
-                    flowables.append(Paragraph(xml_content, styles['H3']))
-                else:
-                    flowables.append(Paragraph(xml_content, styles['H4']))
-            elif line_type == "list_item":
-                in_list = True
-                xml_content = md_to_xml(line_content)
-                flowables.append(Paragraph(f"\u2022  {xml_content}", styles['ListItem']))
-            elif line_type == "num_list_item":
-                in_list = True
-                xml_content = md_to_xml(line_content)
-                flowables.append(Paragraph(f"\u2013  {xml_content}", styles['ListItem']))
-            elif line_type == "hr":
-                in_list = False
+            elif lt == "heading":
+                xml = md_to_xml(lc)
+                flowables.append(Paragraph(xml, styles[{1:'H2',2:'H2',3:'H3'}.get(lv,'H4')]))
+            elif lt == "list_item":
+                flowables.append(Paragraph(f"\u2022  {md_to_xml(lc)}", styles['ListItem']))
+            elif lt == "num_list_item":
+                flowables.append(Paragraph(f"\u2013  {md_to_xml(lc)}", styles['ListItem']))
+            elif lt == "hr":
                 flowables.append(Spacer(1, 6))
-                flowables.append(HRFlowable(width="60%", thickness=0.5, 
-                                            color=colors.Color(0.7, 0.7, 0.7)))
+                flowables.append(HRFlowable(width="60%", thickness=0.5, color=colors.Color(.7,.7,.7)))
                 flowables.append(Spacer(1, 6))
-            elif line_type == "paragraph":
-                in_list = False
-                xml_content = md_to_xml(line_content)
-                flowables.append(Paragraph(xml_content, styles['Body']))
-        
+            elif lt == "paragraph":
+                flowables.append(Paragraph(md_to_xml(lc), styles['Body']))
         return flowables
     
-    # === PASS 1: Build without TOC page numbers to measure actual pages ===
-    chapter_page_tracker = {}
-    
-    class PageTracker:
-        def __init__(self):
-            self.chapter_starts = {}
-            self.current_chapter = None
+    # ---- Build full story (without real TOC page numbers) ----
+    def build_story(styles, toc_page_map=None):
+        story = []
+        # Title page
+        story.append(Spacer(1, 2.5 * inch))
+        story.append(Paragraph(md_to_xml(book['title']), styles['BookTitle']))
+        if book.get('subtitle'):
+            story.append(Spacer(1, 8))
+            story.append(Paragraph(md_to_xml(book['subtitle']), styles['BookSubtitle']))
+        story.append(PageBreak())
         
-        def on_page(self, canvas, doc):
-            add_page_number(canvas, doc)
-            if self.current_chapter is not None and self.current_chapter not in self.chapter_starts:
-                self.chapter_starts[self.current_chapter] = doc.page
-    
-    tracker = PageTracker()
-    styles = make_styles()
-    
-    # Build pass-1 story
-    pass1_story = []
-    
-    # Title page
-    pass1_story.append(Spacer(1, 2.5 * inch))
-    pass1_story.append(Paragraph(md_to_xml(book['title']), styles['BookTitle']))
-    if book.get('subtitle'):
-        pass1_story.append(Spacer(1, 8))
-        pass1_story.append(Paragraph(md_to_xml(book['subtitle']), styles['BookSubtitle']))
-    pass1_story.append(PageBreak())
-    
-    # Placeholder TOC page (will be replaced in pass 2)
-    toc_label = "Table des matieres" if is_fr else "Table of Contents"
-    pass1_story.append(Paragraph(toc_label, styles['TOCTitle']))
-    pass1_story.append(Spacer(1, 20))
-    for chapter in chapters:
-        ch_lbl = f"Chapitre {chapter['chapter_number']}" if is_fr else f"Chapter {chapter['chapter_number']}"
-        pass1_story.append(Paragraph(f"{ch_lbl} : {md_to_xml(chapter['title'])}", styles['TOCLeft']))
-    pass1_story.append(PageBreak())
-    
-    # Chapter pages
-    for chapter in chapters:
-        ch_num = chapter['chapter_number']
+        # TOC page
+        toc_label = "Table des matieres" if is_fr else "Table of Contents"
+        story.append(Paragraph(toc_label, styles['TOCTitle']))
+        toc_rows = []
+        for ch in chapters:
+            ch_num = ch['chapter_number']
+            ch_lbl = f"Chapitre {ch_num}" if is_fr else f"Chapter {ch_num}"
+            title_text = f"{ch_lbl}  -  {md_to_xml(ch['title'])}"
+            page_str = str(toc_page_map.get(ch_num, "")) if toc_page_map else ""
+            toc_rows.append([
+                Paragraph(title_text, styles['TOCLeft']),
+                Paragraph(f"<b>{page_str}</b>", styles['TOCRight']),
+            ])
+        if toc_rows:
+            t = Table(toc_rows, colWidths=[content_w - 0.6*inch, 0.6*inch])
+            t.setStyle(TableStyle([
+                ('VALIGN',(0,0),(-1,-1),'TOP'),
+                ('TOPPADDING',(0,0),(-1,-1),4),
+                ('BOTTOMPADDING',(0,0),(-1,-1),4),
+                ('LINEBELOW',(0,0),(-1,-1),0.3,colors.Color(.85,.85,.85)),
+            ]))
+            story.append(t)
+        story.append(PageBreak())
         
-        # Chapter title page (dedicated full page)
-        class ChapterMarker:
-            def __init__(self, tracker, ch_num):
-                self.tracker = tracker
-                self.ch_num = ch_num
-            def wrap(self, w, h):
-                return (0, 0)
-            def draw(self):
-                self.tracker.current_chapter = self.ch_num
-                if self.ch_num not in self.tracker.chapter_starts:
-                    self.tracker.chapter_starts[self.ch_num] = None  # Will be set in on_page
-        
-        pass1_story.append(ChapterMarker(tracker, ch_num))
-        pass1_story.append(Spacer(1, 2.5 * inch))
-        ch_label = f"CHAPITRE {ch_num}" if is_fr else f"CHAPTER {ch_num}"
-        pass1_story.append(Paragraph(ch_label, styles['ChapterLabel']))
-        pass1_story.append(Spacer(1, 12))
-        pass1_story.append(Paragraph(md_to_xml(chapter['title']), styles['ChapterTitlePage']))
-        pass1_story.append(PageBreak())
-        
-        # Chapter content
-        ch_content = build_chapter_content(chapter, styles)
-        pass1_story.extend(ch_content)
-        pass1_story.append(PageBreak())
+        # Chapters
+        for ch in chapters:
+            cn = ch['chapter_number']
+            # Marker (invisible, records page number)
+            story.append(ChapterMark(cn, page_tracker))
+            # Chapter title page
+            story.append(Spacer(1, 2.5 * inch))
+            lbl = f"CHAPITRE {cn}" if is_fr else f"CHAPTER {cn}"
+            story.append(Paragraph(lbl, styles['ChapLabel']))
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(md_to_xml(ch['title']), styles['ChapTitlePage']))
+            story.append(PageBreak())
+            # Chapter body
+            story.extend(build_chapter_body(ch, styles))
+            story.append(PageBreak())
+        return story
     
-    # Build pass 1 to a temporary buffer
-    pass1_buffer = BytesIO()
-    pass1_doc = SimpleDocTemplate(
-        pass1_buffer, pagesize=(page_w, page_h),
-        leftMargin=0.75 * inch, rightMargin=0.5 * inch,
-        topMargin=0.75 * inch, bottomMargin=0.75 * inch
-    )
+    # ---- Page number drawing ----
+    def draw_page_number(canvas, doc):
+        pn = canvas.getPageNumber()
+        if pn > 1:
+            canvas.saveState()
+            canvas.setFont("Helvetica", 9)
+            canvas.setFillColor(colors.Color(0.4, 0.4, 0.4))
+            canvas.drawCentredString(page_w / 2, 0.4 * inch, str(pn))
+            canvas.restoreState()
     
-    def pass1_page(canvas, doc):
-        tracker.on_page(canvas, doc)
+    # ===== PASS 1: Build to get real page numbers =====
+    page_tracker = {}
+    styles1 = make_styles()
+    story1 = build_story(styles1, toc_page_map=None)
+    
+    buf1 = BytesIO()
+    doc1 = BaseDocTemplate(buf1, pagesize=(page_w, page_h),
+        leftMargin=left_m, rightMargin=right_m, topMargin=top_m, bottomMargin=bottom_m)
+    frame1 = Frame(left_m, bottom_m, content_w, page_h - top_m - bottom_m, id='main')
+    doc1.addPageTemplates([
+        PageTemplate(id='first', frames=[frame1], onPage=lambda c,d: None),
+        PageTemplate(id='later', frames=[frame1], onPage=draw_page_number),
+    ])
+    # Switch to 'later' template after first page
+    story1.insert(1, Spacer(0, 0))  # ensure the template switch happens
     
     try:
-        pass1_doc.build(pass1_story, onFirstPage=lambda c, d: None, onLaterPages=pass1_page)
+        doc1.build(story1)
     except Exception as e:
-        logger.error(f"PDF pass 1 failed: {e}")
+        logger.error(f"PDF pass 1 error: {e}")
     
-    # Get actual page numbers
-    chapter_page_map = tracker.chapter_starts
-    logger.info(f"Chapter page map: {chapter_page_map}")
+    logger.info(f"PDF Pass 1 - Chapter page map: {page_tracker}")
     
-    # === PASS 2: Build final PDF with correct TOC page numbers ===
+    # ===== PASS 2: Rebuild with correct TOC page numbers =====
+    page_tracker_pass2 = {}
+    # Re-point ChapterMark to new dict so pass2 markers don't overwrite
+    # We'll use the pass1 results
+    final_page_map = dict(page_tracker)
+    
+    # Build a new tracker for pass 2 (won't be used for TOC but keeps markers happy)
+    page_tracker.clear()
+    
     styles2 = make_styles()
-    final_story = []
+    story2 = build_story(styles2, toc_page_map=final_page_map)
     
-    # Title page
-    final_story.append(Spacer(1, 2.5 * inch))
-    final_story.append(Paragraph(md_to_xml(book['title']), styles2['BookTitle']))
-    if book.get('subtitle'):
-        final_story.append(Spacer(1, 8))
-        final_story.append(Paragraph(md_to_xml(book['subtitle']), styles2['BookSubtitle']))
-    final_story.append(PageBreak())
+    doc2 = BaseDocTemplate(str(filepath), pagesize=(page_w, page_h),
+        leftMargin=left_m, rightMargin=right_m, topMargin=top_m, bottomMargin=bottom_m)
+    frame2 = Frame(left_m, bottom_m, content_w, page_h - top_m - bottom_m, id='main')
+    doc2.addPageTemplates([
+        PageTemplate(id='first', frames=[frame2], onPage=lambda c,d: None),
+        PageTemplate(id='later', frames=[frame2], onPage=draw_page_number),
+    ])
     
-    # Real TOC with 2-column table layout
-    final_story.append(Paragraph(toc_label, styles2['TOCTitle']))
-    
-    toc_data = []
-    for chapter in chapters:
-        ch_num = chapter['chapter_number']
-        ch_lbl = f"Chapitre {ch_num}" if is_fr else f"Chapter {ch_num}"
-        title_text = f"{ch_lbl}  -  {md_to_xml(chapter['title'])}"
-        page_num = chapter_page_map.get(ch_num, "")
-        if page_num is None:
-            page_num = ""
-        
-        toc_data.append([
-            Paragraph(title_text, styles2['TOCLeft']),
-            Paragraph(f"<b>{page_num}</b>", styles2['TOCRight']),
-        ])
-    
-    if toc_data:
-        col1_w = content_w - 0.6 * inch
-        col2_w = 0.6 * inch
-        toc_table = Table(toc_data, colWidths=[col1_w, col2_w])
-        toc_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('LINEBELOW', (0, 0), (-1, -1), 0.3, colors.Color(0.85, 0.85, 0.85)),
-        ]))
-        final_story.append(toc_table)
-    
-    final_story.append(PageBreak())
-    
-    # Chapters with title pages
-    for chapter in chapters:
-        ch_num = chapter['chapter_number']
-        
-        # Dedicated chapter title page
-        final_story.append(Spacer(1, 2.5 * inch))
-        ch_label = f"CHAPITRE {ch_num}" if is_fr else f"CHAPTER {ch_num}"
-        final_story.append(Paragraph(ch_label, styles2['ChapterLabel']))
-        final_story.append(Spacer(1, 12))
-        final_story.append(Paragraph(md_to_xml(chapter['title']), styles2['ChapterTitlePage']))
-        final_story.append(PageBreak())
-        
-        # Chapter content (title already stripped)
-        ch_content = build_chapter_content(chapter, styles2)
-        final_story.extend(ch_content)
-        final_story.append(PageBreak())
-    
-    doc = SimpleDocTemplate(
-        str(filepath), pagesize=(page_w, page_h),
-        leftMargin=0.75 * inch, rightMargin=0.5 * inch,
-        topMargin=0.75 * inch, bottomMargin=0.75 * inch
-    )
-    doc.build(final_story, onFirstPage=lambda c, d: None, onLaterPages=add_page_number)
+    doc2.build(story2)
     return filepath
 
 async def export_docx(book):
