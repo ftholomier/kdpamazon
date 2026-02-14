@@ -123,7 +123,7 @@ async def call_gemini(prompt, system_message="You are a helpful assistant.", ses
     return response
 
 async def generate_image_ai(prompt, book_id, image_name):
-    """Generate an image using Gemini Nano Banana."""
+    """Generate a photorealistic image using Gemini Nano Banana."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     api_key, _ = await get_active_api_key()
@@ -131,7 +131,7 @@ async def generate_image_ai(prompt, book_id, image_name):
     chat = LlmChat(
         api_key=api_key,
         session_id=str(uuid.uuid4()),
-        system_message="You are an expert illustrator creating professional book illustrations."
+        system_message="You are a professional photographer. Create ultra-realistic, photorealistic images. NEVER create cartoon, illustration, or drawing style images. Always produce images that look like real photographs taken with a professional camera."
     )
     chat.with_model("gemini", "gemini-3-pro-image-preview").with_params(modalities=["image", "text"])
     
@@ -145,6 +145,23 @@ async def generate_image_ai(prompt, book_id, image_name):
             f.write(img_data)
         return str(img_path), base64.b64encode(img_data).decode('utf-8')[:50]
     return None, None
+
+async def generate_stock_search_query(chapter_title, chapter_content, book_title):
+    """Use AI to generate the best stock photo search query for a chapter."""
+    try:
+        prompt = f"""Based on this book chapter, generate a single short search query (2-4 words) to find a relevant stock photo.
+Book: {book_title}
+Chapter: {chapter_title}
+Content excerpt: {chapter_content[:500]}
+
+Return ONLY the search query, nothing else. Example: "meditation sunrise nature" or "kitchen cooking vegetables" """
+        response = await call_gemini(prompt, "Return only a short stock photo search query, no explanation.")
+        query = response.strip().strip('"').strip("'")
+        # Ensure it's short enough
+        words = query.split()[:4]
+        return " ".join(words)
+    except Exception:
+        return chapter_title
 
 async def fetch_stock_image(query, book_id, image_name):
     """Fetch image from free stock sources and save locally."""
