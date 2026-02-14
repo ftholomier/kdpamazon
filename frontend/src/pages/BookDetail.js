@@ -420,10 +420,10 @@ export default function BookDetail() {
                         </div>
                       )}
 
-                      {/* Chapter content preview */}
-                      <ScrollArea className="max-h-96 mb-4">
-                        <div className="prose prose-sm prose-invert max-w-none">
-                          {chapter.content?.split("\n").slice(0, 30).map((line, i) => {
+                      {/* Chapter content - full scrollable */}
+                      <ScrollArea className="h-[500px] mb-4">
+                        <div className="prose prose-sm prose-invert max-w-none pr-4">
+                          {chapter.content?.split("\n").map((line, i) => {
                             const trimmed = line.trim();
                             if (!trimmed) return <br key={i} />;
                             if (/^#{1,4}\s/.test(trimmed)) {
@@ -433,17 +433,17 @@ export default function BookDetail() {
                             if (/^[-*]\s/.test(trimmed)) {
                               return <li key={i} className="text-white/50 text-sm ml-4 list-disc">{trimmed.replace(/^[-*]\s+/, "")}</li>;
                             }
-                            // Clean inline markdown for display
-                            const cleaned = trimmed
-                              .replace(/\*{2,3}(.+?)\*{2,3}/g, "$1")
-                              .replace(/\*(.+?)\*/g, "$1");
-                            return <p key={i} className="text-white/50 text-sm leading-relaxed mb-2">{cleaned}</p>;
+                            if (/^\d+[.)]\s/.test(trimmed)) {
+                              return <li key={i} className="text-white/50 text-sm ml-4 list-decimal">{trimmed.replace(/^\d+[.)]\s+/, "")}</li>;
+                            }
+                            // Render inline bold/italic
+                            const html = trimmed
+                              .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                              .replace(/\*{3}(.+?)\*{3}/g, "<strong><em>$1</em></strong>")
+                              .replace(/\*{2}(.+?)\*{2}/g, "<strong>$1</strong>")
+                              .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>");
+                            return <p key={i} className="text-white/50 text-sm leading-relaxed mb-2" dangerouslySetInnerHTML={{ __html: html }} />;
                           })}
-                          {chapter.content?.split("\n").length > 30 && (
-                            <p className="text-indigo-400 text-sm mt-4">
-                              {is_fr ? "... cliquez sur Apercu pour lire le chapitre complet" : "... click Preview to read full chapter"}
-                            </p>
-                          )}
                         </div>
                       </ScrollArea>
 
