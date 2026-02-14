@@ -182,7 +182,7 @@ def main():
     delete_success = True
     if chapters_with_images:
         test_chapter = chapters_with_images[0]['chapter_number']
-        delete_success = tester.test_delete_image_endpoint(book_id, test_chapter)[0]
+        delete_success, _ = tester.test_delete_image_endpoint(book_id, test_chapter)
     else:
         tester.log("⚠️  No chapters with images found to test delete endpoint", "WARN")
     
