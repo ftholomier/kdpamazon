@@ -71,11 +71,11 @@ class BookExportTester:
         if success and response.get('content_type'):
             if 'application/pdf' in response['content_type'] or 'application/octet-stream' in response['content_type']:
                 self.log("✅ PDF export returned correct content type")
-                return True
+                return success, response
             else:
                 self.log(f"❌ PDF export returned wrong content type: {response['content_type']}", "ERROR")
-                return False
-        return success
+                return False, response
+        return success, response
 
     def test_export_docx(self, book_id):
         """Test DOCX export with TOC page numbers"""
@@ -88,11 +88,11 @@ class BookExportTester:
         if success and response.get('content_type'):
             if 'application/vnd.openxmlformats' in response['content_type'] or 'application/octet-stream' in response['content_type']:
                 self.log("✅ DOCX export returned correct content type")
-                return True
+                return success, response
             else:
                 self.log(f"❌ DOCX export returned wrong content type: {response['content_type']}", "ERROR")
-                return False
-        return success
+                return False, response
+        return success, response
 
     def test_export_epub(self, book_id):
         """Test EPUB export"""
@@ -123,11 +123,11 @@ class BookExportTester:
             # Check if image_url is returned
             if response.get('image_url'):
                 self.log(f"✅ Image generated successfully: {response['image_url']}")
-                return True
+                return success, response
             else:
                 self.log("⚠️  Image generation API succeeded but no image_url returned", "WARN")
-                return True  # Still counts as API success
-        return False
+                return success, response  # Still counts as API success
+        return success, response
 
     def check_backend_logs_for_stock_queries(self):
         """Check if backend logs show stock image search queries"""
