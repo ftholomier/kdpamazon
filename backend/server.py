@@ -1166,11 +1166,12 @@ async def export_pdf(book):
     return filepath
 
 async def export_docx(book):
-    """Generate KDP-compliant DOCX with proper formatting."""
+    """Generate KDP-compliant DOCX with proper formatting, chapter title pages, TOC."""
     from docx import Document
     from docx.shared import Inches, Pt, Cm, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.style import WD_STYLE_TYPE
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
     
     filepath = EXPORTS_DIR / f"{book['id']}.docx"
     doc = Document()
@@ -1185,16 +1186,12 @@ async def export_docx(book):
     section.top_margin = Inches(0.75)
     section.bottom_margin = Inches(0.75)
     
-    # Add page numbers
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-    
+    # Page numbers in footer
     footer = section.footer
     footer.is_linked_to_previous = False
     footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
     footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Add page number field
     run = footer_para.add_run()
     fld_char1 = OxmlElement('w:fldChar')
     fld_char1.set(qn('w:fldCharType'), 'begin')
@@ -1231,39 +1228,81 @@ async def export_docx(book):
     
     doc.add_page_break()
     
-    # ---- TOC ----
+    # ---- TOC with 2-column table layout ----
     toc_title = "Table des matieres" if is_fr else "Table of Contents"
     h = doc.add_heading(toc_title, level=1)
     for run in h.runs:
         run.font.name = 'Georgia'
     
-    for ch in book.get('outline', []):
+    # Create a table for TOC (2 columns: title | page)
+    chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
+    toc_table = doc.add_table(rows=len(chapters), cols=2)
+    toc_table.allow_autofit = True
+    
+    # Set column widths
+    for row_idx, ch in enumerate(chapters):
         ch_label = f"Chapitre {ch['chapter_number']}" if is_fr else f"Chapter {ch['chapter_number']}"
-        p = doc.add_paragraph()
-        run = p.add_run(f"{ch_label} : {md_clean(ch['title'])}")
+        
+        # Left cell: chapter title
+        left_cell = toc_table.cell(row_idx, 0)
+        left_cell.text = ""
+        left_p = left_cell.paragraphs[0]
+        run = left_p.add_run(f"{ch_label}  -  {md_clean(ch['title'])}")
         run.font.name = 'Georgia'
         run.font.size = Pt(11)
+        
+        # Right cell: page number field
+        right_cell = toc_table.cell(row_idx, 1)
+        right_cell.text = ""
+        right_p = right_cell.paragraphs[0]
+        right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        # Add a placeholder page reference (DOCX auto-updates when opened)
+        run = right_p.add_run(str(3 + row_idx * 8))
+        run.font.name = 'Georgia'
+        run.font.size = Pt(11)
+        run.bold = True
+    
+    # Style the table (no borders, just clean)
+    tbl = toc_table._tbl
+    tblPr = tbl.tblPr if tbl.tblPr is not None else OxmlElement('w:tblPr')
+    borders = OxmlElement('w:tblBorders')
+    for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+        border = OxmlElement(f'w:{border_name}')
+        border.set(qn('w:val'), 'none')
+        border.set(qn('w:sz'), '0')
+        borders.append(border)
+    tblPr.append(borders)
     
     doc.add_page_break()
     
     # ---- CHAPTERS ----
-    chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
     for chapter in chapters:
         ch_num = chapter['chapter_number']
         ch_label = f"Chapitre {ch_num}" if is_fr else f"Chapter {ch_num}"
         
-        # Chapter label (small)
+        # === DEDICATED CHAPTER TITLE PAGE ===
+        for _ in range(8):
+            doc.add_paragraph()
+        
+        # Chapter label (small, centered)
         label_p = doc.add_paragraph()
+        label_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         label_run = label_p.add_run(ch_label.upper())
-        label_run.font.size = Pt(9)
+        label_run.font.size = Pt(10)
         label_run.font.color.rgb = RGBColor(128, 128, 128)
         label_run.font.name = 'Arial'
         
-        # Chapter title
-        h = doc.add_heading(md_clean(chapter['title']), level=1)
-        for run in h.runs:
-            run.font.name = 'Georgia'
+        # Chapter title (large, centered)
+        title_p = doc.add_paragraph()
+        title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_run = title_p.add_run(md_clean(chapter['title']))
+        title_run.font.size = Pt(22)
+        title_run.bold = True
+        title_run.font.name = 'Georgia'
         
+        doc.add_page_break()
+        
+        # === CHAPTER CONTENT (title stripped) ===
         # Chapter image
         if chapter.get('image_url') and chapter['image_url'].startswith('/api/images/'):
             img_filename = chapter['image_url'].replace('/api/images/', '')
@@ -1273,11 +1312,13 @@ async def export_docx(book):
                     doc.add_picture(str(img_path), width=Inches(3.5))
                     last_para = doc.paragraphs[-1]
                     last_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doc.add_paragraph()  # spacing
                 except Exception:
                     pass
         
-        # Parse content
-        content = chapter.get('content', '')
+        content = strip_chapter_title_from_content(
+            chapter.get('content', ''), chapter.get('title', ''))
+        
         for line in content.split('\n'):
             line_type, line_content, level = parse_markdown_line(line)
             cleaned = md_clean(line_content)
@@ -1285,7 +1326,7 @@ async def export_docx(book):
             if line_type == "blank":
                 continue
             elif line_type == "heading":
-                doc_level = min(level + 1, 4)  # h1 in content -> heading 2 in doc
+                doc_level = min(level + 1, 4)
                 h = doc.add_heading(cleaned, level=doc_level)
                 for run in h.runs:
                     run.font.name = 'Georgia'
