@@ -1099,9 +1099,9 @@ async def export_pdf(book):
     return filepath
 
 async def export_docx(book):
-    """Generate KDP-compliant DOCX with proper formatting, chapter title pages, TOC."""
+    """Generate KDP-compliant DOCX with proper formatting, chapter title pages, TOC with page numbers."""
     from docx import Document
-    from docx.shared import Inches, Pt, Cm, RGBColor
+    from docx.shared import Inches, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
@@ -1110,7 +1110,7 @@ async def export_docx(book):
     doc = Document()
     is_fr = book.get('language') != 'en'
     
-    # Page setup - KDP standard
+    # Page setup - KDP 5.5 x 8.5
     section = doc.sections[0]
     section.page_width = Inches(5.5)
     section.page_height = Inches(8.5)
@@ -1119,27 +1119,62 @@ async def export_docx(book):
     section.top_margin = Inches(0.75)
     section.bottom_margin = Inches(0.75)
     
-    # Page numbers in footer
+    # Footer with page numbers
     footer = section.footer
     footer.is_linked_to_previous = False
     footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
     footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
     run = footer_para.add_run()
-    fld_char1 = OxmlElement('w:fldChar')
-    fld_char1.set(qn('w:fldCharType'), 'begin')
-    run._r.append(fld_char1)
-    
+    fld1 = OxmlElement('w:fldChar'); fld1.set(qn('w:fldCharType'), 'begin'); run._r.append(fld1)
     run2 = footer_para.add_run()
-    instr = OxmlElement('w:instrText')
-    instr.set(qn('xml:space'), 'preserve')
-    instr.text = ' PAGE '
-    run2._r.append(instr)
-    
+    instr = OxmlElement('w:instrText'); instr.set(qn('xml:space'), 'preserve'); instr.text = ' PAGE '; run2._r.append(instr)
     run3 = footer_para.add_run()
-    fld_char2 = OxmlElement('w:fldChar')
-    fld_char2.set(qn('w:fldCharType'), 'end')
-    run3._r.append(fld_char2)
+    fld2 = OxmlElement('w:fldChar'); fld2.set(qn('w:fldCharType'), 'end'); run3._r.append(fld2)
+    
+    chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
+    
+    # ---- PRE-CALCULATE real page numbers ----
+    # KDP 5.5x8.5 with margins => usable area ~4.25 x 7 inches
+    # At 11pt Times Roman ~16pt leading, about 31 lines per page, ~10 words/line => ~310 words/page
+    # A heading takes ~2 lines, a list item ~1.5 lines, image ~12 lines
+    WORDS_PER_PAGE = 280  # conservative for formatted text
+    LINES_PER_PAGE = 31
+    
+    chapter_page_starts = {}
+    current_page = 3  # page 1 = title, page 2 = TOC (at least), page 3+ = chapters
+    
+    # Estimate TOC pages: ~1.5 lines per entry
+    toc_lines = len(chapters) * 1.5 + 4  # header + spacing
+    toc_pages = max(1, int(toc_lines / LINES_PER_PAGE) + 1)
+    current_page = 1 + toc_pages + 1  # title page + toc pages + 1
+    
+    for ch in chapters:
+        chapter_page_starts[ch['chapter_number']] = current_page
+        current_page += 1  # chapter title page
+        
+        content = strip_chapter_title_from_content(ch.get('content', ''), ch.get('title', ''))
+        lines = content.split('\n')
+        
+        # Count estimated lines
+        total_lines = 0
+        if ch.get('image_url'):
+            total_lines += 14  # image takes ~14 lines
+        for line in lines:
+            lt, lc, lv = parse_markdown_line(line)
+            if lt == "blank":
+                total_lines += 0.5
+            elif lt == "heading":
+                total_lines += 3
+            elif lt in ("list_item", "num_list_item"):
+                total_lines += 1.2
+            elif lt == "paragraph":
+                word_count = len(lc.split())
+                total_lines += max(1, word_count / 10)
+            elif lt == "hr":
+                total_lines += 2
+        
+        content_pages = max(1, int(total_lines / LINES_PER_PAGE) + 1)
+        current_page += content_pages
     
     # ---- TITLE PAGE ----
     for _ in range(8):
@@ -1147,95 +1182,67 @@ async def export_docx(book):
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = title_p.add_run(md_clean(book['title']))
-    run.font.size = Pt(28)
-    run.bold = True
-    run.font.name = 'Georgia'
-    
+    run.font.size = Pt(28); run.bold = True; run.font.name = 'Georgia'
     if book.get('subtitle'):
         sub_p = doc.add_paragraph()
         sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = sub_p.add_run(md_clean(book['subtitle']))
-        run.font.size = Pt(14)
-        run.font.color.rgb = RGBColor(100, 100, 100)
-        run.font.name = 'Georgia'
-    
+        run.font.size = Pt(14); run.font.color.rgb = RGBColor(100,100,100); run.font.name = 'Georgia'
     doc.add_page_break()
     
-    # ---- TOC with 2-column table layout ----
+    # ---- TOC with 2-column table ----
     toc_title = "Table des matieres" if is_fr else "Table of Contents"
     h = doc.add_heading(toc_title, level=1)
-    for run in h.runs:
-        run.font.name = 'Georgia'
+    for r in h.runs: r.font.name = 'Georgia'
     
-    # Create a table for TOC (2 columns: title | page)
-    chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
     toc_table = doc.add_table(rows=len(chapters), cols=2)
     toc_table.allow_autofit = True
     
-    # Set column widths
     for row_idx, ch in enumerate(chapters):
-        ch_label = f"Chapitre {ch['chapter_number']}" if is_fr else f"Chapter {ch['chapter_number']}"
+        ch_lbl = f"Chapitre {ch['chapter_number']}" if is_fr else f"Chapter {ch['chapter_number']}"
+        page_num = chapter_page_starts.get(ch['chapter_number'], "")
         
-        # Left cell: chapter title
         left_cell = toc_table.cell(row_idx, 0)
         left_cell.text = ""
-        left_p = left_cell.paragraphs[0]
-        run = left_p.add_run(f"{ch_label}  -  {md_clean(ch['title'])}")
-        run.font.name = 'Georgia'
-        run.font.size = Pt(11)
+        lp = left_cell.paragraphs[0]
+        run = lp.add_run(f"{ch_lbl}  -  {md_clean(ch['title'])}")
+        run.font.name = 'Georgia'; run.font.size = Pt(11)
         
-        # Right cell: page number field
         right_cell = toc_table.cell(row_idx, 1)
         right_cell.text = ""
-        right_p = right_cell.paragraphs[0]
-        right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        # Add a placeholder page reference (DOCX auto-updates when opened)
-        run = right_p.add_run(str(3 + row_idx * 8))
-        run.font.name = 'Georgia'
-        run.font.size = Pt(11)
-        run.bold = True
+        rp = right_cell.paragraphs[0]
+        rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        run = rp.add_run(str(page_num))
+        run.font.name = 'Georgia'; run.font.size = Pt(11); run.bold = True
     
-    # Style the table (no borders, just clean)
+    # Remove table borders
     tbl = toc_table._tbl
     tblPr = tbl.tblPr if tbl.tblPr is not None else OxmlElement('w:tblPr')
     borders = OxmlElement('w:tblBorders')
-    for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
-        border = OxmlElement(f'w:{border_name}')
-        border.set(qn('w:val'), 'none')
-        border.set(qn('w:sz'), '0')
-        borders.append(border)
+    for bn in ['top','left','bottom','right','insideH','insideV']:
+        b = OxmlElement(f'w:{bn}'); b.set(qn('w:val'),'none'); b.set(qn('w:sz'),'0'); borders.append(b)
     tblPr.append(borders)
     
     doc.add_page_break()
     
     # ---- CHAPTERS ----
     for chapter in chapters:
-        ch_num = chapter['chapter_number']
-        ch_label = f"Chapitre {ch_num}" if is_fr else f"Chapter {ch_num}"
+        cn = chapter['chapter_number']
+        ch_lbl = f"Chapitre {cn}" if is_fr else f"Chapter {cn}"
         
-        # === DEDICATED CHAPTER TITLE PAGE ===
+        # Chapter title page
         for _ in range(8):
             doc.add_paragraph()
-        
-        # Chapter label (small, centered)
-        label_p = doc.add_paragraph()
-        label_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        label_run = label_p.add_run(ch_label.upper())
-        label_run.font.size = Pt(10)
-        label_run.font.color.rgb = RGBColor(128, 128, 128)
-        label_run.font.name = 'Arial'
-        
-        # Chapter title (large, centered)
-        title_p = doc.add_paragraph()
-        title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_run = title_p.add_run(md_clean(chapter['title']))
-        title_run.font.size = Pt(22)
-        title_run.bold = True
-        title_run.font.name = 'Georgia'
-        
+        lp = doc.add_paragraph()
+        lp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        lr = lp.add_run(ch_lbl.upper())
+        lr.font.size = Pt(10); lr.font.color.rgb = RGBColor(128,128,128); lr.font.name = 'Arial'
+        tp = doc.add_paragraph()
+        tp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        tr = tp.add_run(md_clean(chapter['title']))
+        tr.font.size = Pt(22); tr.bold = True; tr.font.name = 'Georgia'
         doc.add_page_break()
         
-        # === CHAPTER CONTENT (title stripped) ===
         # Chapter image
         if chapter.get('image_url') and chapter['image_url'].startswith('/api/images/'):
             img_filename = chapter['image_url'].replace('/api/images/', '')
@@ -1243,41 +1250,29 @@ async def export_docx(book):
             if img_path.exists():
                 try:
                     doc.add_picture(str(img_path), width=Inches(3.5))
-                    last_para = doc.paragraphs[-1]
-                    last_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    doc.add_paragraph()  # spacing
-                except Exception:
-                    pass
+                    doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doc.add_paragraph()
+                except Exception: pass
         
-        content = strip_chapter_title_from_content(
-            chapter.get('content', ''), chapter.get('title', ''))
-        
+        # Chapter content (stripped)
+        content = strip_chapter_title_from_content(chapter.get('content', ''), chapter.get('title', ''))
         for line in content.split('\n'):
-            line_type, line_content, level = parse_markdown_line(line)
-            cleaned = md_clean(line_content)
-            
-            if line_type == "blank":
-                continue
-            elif line_type == "heading":
-                doc_level = min(level + 1, 4)
-                h = doc.add_heading(cleaned, level=doc_level)
-                for run in h.runs:
-                    run.font.name = 'Georgia'
-            elif line_type in ("list_item", "num_list_item"):
-                p = doc.add_paragraph(style='List Bullet' if line_type == "list_item" else 'List Number')
-                _add_formatted_runs(p, line_content)
-                p.paragraph_format.space_after = Pt(3)
-            elif line_type == "hr":
+            lt, lc, lv = parse_markdown_line(line)
+            cleaned = md_clean(lc)
+            if lt == "blank": continue
+            elif lt == "heading":
+                h = doc.add_heading(cleaned, level=min(lv+1, 4))
+                for r in h.runs: r.font.name = 'Georgia'
+            elif lt in ("list_item", "num_list_item"):
+                p = doc.add_paragraph(style='List Bullet' if lt == "list_item" else 'List Number')
+                _add_formatted_runs(p, lc); p.paragraph_format.space_after = Pt(3)
+            elif lt == "hr":
+                p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                r = p.add_run("_" * 30); r.font.color.rgb = RGBColor(180,180,180)
+            elif lt == "paragraph":
                 p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run("_" * 30)
-                run.font.color.rgb = RGBColor(180, 180, 180)
-            elif line_type == "paragraph":
-                p = doc.add_paragraph()
-                _add_formatted_runs(p, line_content)
-                p.paragraph_format.space_after = Pt(6)
+                _add_formatted_runs(p, lc); p.paragraph_format.space_after = Pt(6)
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        
         doc.add_page_break()
     
     doc.save(str(filepath))
