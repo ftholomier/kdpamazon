@@ -173,18 +173,38 @@ export default function BookDetail() {
             </div>
           </div>
 
-          {chapters.map((ch) => (
+          {chapters.map((ch) => {
+            // Strip the first heading if it matches the chapter title
+            const lines = ch.content?.split("\n") || [];
+            let startIdx = 0;
+            for (let i = 0; i < lines.length; i++) {
+              const t = lines[i].trim();
+              if (!t) { startIdx = i + 1; continue; }
+              if (/^#{1,4}\s/.test(t)) {
+                const hText = t.replace(/^#{1,4}\s+/, "").toLowerCase();
+                if (ch.title.toLowerCase().includes(hText) || hText.includes(ch.title.toLowerCase())) {
+                  startIdx = i + 1;
+                  if (startIdx < lines.length && !lines[startIdx].trim()) startIdx++;
+                }
+              }
+              break;
+            }
+            const contentLines = lines.slice(startIdx);
+            
+            return (
             <div
               key={ch.chapter_number}
               className="book-page rounded-lg p-12 shadow-2xl mb-4"
               data-testid={`preview-chapter-${ch.chapter_number}`}
             >
-              <p className="text-xs uppercase tracking-widest text-gray-400 mb-2">
-                {is_fr ? `Chapitre ${ch.chapter_number}` : `Chapter ${ch.chapter_number}`}
-              </p>
-              <h1 className="text-2xl font-bold text-gray-900 mb-6" style={{ fontFamily: "'Fraunces', serif" }}>
-                {ch.title}
-              </h1>
+              <div className="text-center mb-10 pt-16 pb-6 border-b border-gray-200">
+                <p className="text-xs uppercase tracking-[0.25em] text-gray-400 mb-3">
+                  {is_fr ? `Chapitre ${ch.chapter_number}` : `Chapter ${ch.chapter_number}`}
+                </p>
+                <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "'Fraunces', serif" }}>
+                  {ch.title}
+                </h1>
+              </div>
               {ch.image_url && (
                 <div className="mb-6 flex justify-center">
                   <img
@@ -195,7 +215,7 @@ export default function BookDetail() {
                 </div>
               )}
               <div className="prose">
-                {ch.content?.split("\n").map((line, i) => {
+                {contentLines.map((line, i) => {
                   const trimmed = line.trim();
                   if (!trimmed) return <br key={i} />;
                   if (/^#{1,4}\s/.test(trimmed)) {
