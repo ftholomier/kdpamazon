@@ -1389,7 +1389,7 @@ def _add_formatted_runs(paragraph, text):
                         run.font.size = Pt(11)
 
 async def export_epub(book):
-    """Generate EPUB with proper formatting."""
+    """Generate EPUB with proper formatting, chapter title pages, TOC."""
     from ebooklib import epub
     
     filepath = EXPORTS_DIR / f"{book['id']}.epub"
@@ -1400,7 +1400,6 @@ async def export_epub(book):
     ebook.set_title(book['title'])
     ebook.set_language(book.get('language', 'fr'))
     
-    # CSS
     css_content = """
     body { font-family: Georgia, 'Times New Roman', serif; line-height: 1.8; color: #1a1a1a; margin: 1em; }
     h1 { font-size: 1.6em; margin-top: 2em; margin-bottom: 0.5em; font-weight: bold; }
@@ -1410,12 +1409,16 @@ async def export_epub(book):
     p { text-align: justify; margin-bottom: 0.5em; font-size: 1em; }
     ul, ol { margin-left: 1.5em; margin-bottom: 0.5em; }
     li { margin-bottom: 0.2em; }
-    .chapter-label { font-size: 0.8em; color: #888; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 0; }
-    .chapter-title { font-size: 1.8em; margin-top: 0.2em; }
+    .chapter-title-page { text-align: center; padding-top: 40%; }
+    .chapter-label { font-size: 0.85em; color: #888; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 0.5em; }
+    .chapter-title { font-size: 1.8em; margin-top: 0.2em; font-weight: bold; }
     hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 20%; }
     strong { font-weight: bold; }
     em { font-style: italic; }
     code { font-family: 'Courier New', monospace; font-size: 0.9em; background: #f5f5f5; padding: 0.1em 0.3em; }
+    .toc-table { width: 100%; border-collapse: collapse; }
+    .toc-table td { padding: 0.3em 0; vertical-align: top; }
+    .toc-table td:last-child { text-align: right; font-weight: bold; width: 3em; }
     """
     style = epub.EpubItem(uid="style", file_name="style/default.css", 
                           media_type="text/css", content=css_content.encode('utf-8'))
@@ -1424,14 +1427,15 @@ async def export_epub(book):
     chapters_epub = []
     chapters = sorted(book.get('chapters', []), key=lambda x: x.get('chapter_number', 0))
     
-    # TOC page
+    # TOC page with table layout
     toc_ch = epub.EpubHtml(title="Table des matieres" if is_fr else "Table of Contents",
                            file_name="toc.xhtml", lang=book.get('language', 'fr'))
     toc_label = "Table des matieres" if is_fr else "Table of Contents"
-    toc_html = f"<h1>{toc_label}</h1>"
-    for ch_data in chapters:
+    toc_html = f"<h1>{toc_label}</h1><table class='toc-table'>"
+    for idx, ch_data in enumerate(chapters):
         ch_lbl = f"Chapitre {ch_data['chapter_number']}" if is_fr else f"Chapter {ch_data['chapter_number']}"
-        toc_html += f'<p><a href="chapter_{ch_data["chapter_number"]}.xhtml">{ch_lbl} : {md_to_html(ch_data["title"])}</a></p>'
+        toc_html += f'<tr><td><a href="chapter_{ch_data["chapter_number"]}.xhtml">{ch_lbl}  -  {md_to_html(ch_data["title"])}</a></td><td>{idx + 3}</td></tr>'
+    toc_html += "</table>"
     toc_ch.content = toc_html
     toc_ch.add_item(style)
     ebook.add_item(toc_ch)
@@ -1444,14 +1448,21 @@ async def export_epub(book):
         )
         
         ch_label = f"Chapitre {chapter['chapter_number']}" if is_fr else f"Chapter {chapter['chapter_number']}"
-        content_html = f'<p class="chapter-label">{ch_label}</p>'
+        
+        # Dedicated chapter title section
+        content_html = f'<div class="chapter-title-page">'
+        content_html += f'<p class="chapter-label">{ch_label}</p>'
         content_html += f'<h1 class="chapter-title">{md_to_html(chapter["title"])}</h1>'
+        content_html += f'</div><hr/>'
+        
+        # Content with title stripped
+        stripped_content = strip_chapter_title_from_content(
+            chapter.get('content', ''), chapter.get('title', ''))
         
         in_list = False
         list_type = None
-        content = chapter.get('content', '')
         
-        for line in content.split('\n'):
+        for line in stripped_content.split('\n'):
             line_type, line_content, level = parse_markdown_line(line)
             
             if line_type in ("list_item", "num_list_item"):
