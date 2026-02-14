@@ -640,12 +640,22 @@ async def generate_chapter_image(book_id: str, chapter_num: int):
     
     settings = await get_settings()
     image_source = settings.get("image_source", "ai")
-    suggestion = chapter.get("image_suggestion", chapter.get("title", ""))
+    ch_title = chapter.get("title", "")
+    ch_content = chapter.get("content", "")
+    book_title = book.get("title", "")
     
     image_url = None
     if image_source in ("ai", "both"):
         try:
-            prompt = f"Create a professional, high-quality illustration for a book chapter titled '{chapter['title']}'. The image should be: {suggestion}. Style: clean, professional, suitable for print publication. No text in the image."
+            # Photorealistic AI prompt based on actual chapter content
+            content_excerpt = ch_content[:600].replace('\n', ' ')
+            prompt = f"""Generate a photorealistic, ultra-realistic photograph for a book chapter.
+Book: "{book_title}"
+Chapter: "{ch_title}"
+Content: {content_excerpt}
+
+The image must look like a real professional photograph, NOT a cartoon, NOT an illustration, NOT a drawing.
+High resolution, natural lighting, professional photography style. No text or watermarks in the image."""
             img_path, _ = await generate_image_ai(prompt, book_id, f"ch{chapter_num}")
             if img_path:
                 image_url = f"/api/images/{book_id}_ch{chapter_num}.png"
@@ -653,7 +663,10 @@ async def generate_chapter_image(book_id: str, chapter_num: int):
             logger.error(f"AI image generation failed: {e}")
     
     if not image_url and image_source in ("stock", "both"):
-        stock_url = await fetch_stock_image(suggestion, book_id, f"ch{chapter_num}")
+        # Use AI to generate a relevant search query from chapter content
+        smart_query = await generate_stock_search_query(ch_title, ch_content, book_title)
+        logger.info(f"Stock image search query for ch{chapter_num}: '{smart_query}'")
+        stock_url = await fetch_stock_image(smart_query, book_id, f"ch{chapter_num}")
         if stock_url:
             image_url = stock_url
     
