@@ -98,52 +98,43 @@ async def get_active_api_key():
     return os.environ.get('EMERGENT_LLM_KEY', ''), "emergent"
 
 async def call_gemini(prompt, system_message="You are a helpful assistant.", session_id=None):
-    """Call Gemini 2.5 Flash Lite via emergentintegrations."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    
-    api_key, key_type = await get_active_api_key()
-    if not session_id:
-        session_id = str(uuid.uuid4())
-    
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=session_id,
-        system_message=system_message
+    """Call Gemini via google.genai."""
+    from google import genai
+    from google.genai import types
+
+    api_key, _ = await get_active_api_key()
+    client = genai.Client(api_key=api_key)
+
+    response = await client.aio.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(system_instruction=system_message)
     )
-    
-    if key_type == "gemini":
-        # User's own Google key - use directly with Gemini
-        chat.with_model("gemini", "gemini-2.5-flash-lite")
-    else:
-        # Emergent universal key - use gemini-2.5-flash (closest available)
-        chat.with_model("gemini", "gemini-2.5-flash")
-    
-    msg = UserMessage(text=prompt)
-    response = await chat.send_message(msg)
-    return response
+    return response.text
 
 async def generate_image_ai(prompt, book_id, image_name):
-    """Generate a photorealistic image using Gemini Nano Banana."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    
+    """Generate a photorealistic image using Nano Banana."""
+    from google import genai
+    from google.genai import types
+
     api_key, _ = await get_active_api_key()
-    
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=str(uuid.uuid4()),
-        system_message="You are a professional photographer. Create ultra-realistic, photorealistic images. NEVER create cartoon, illustration, or drawing style images. Always produce images that look like real photographs taken with a professional camera."
+    client = genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
+
+    full_prompt = "Photorealistic professional photograph, ultra-realistic, natural lighting, NO cartoon, NO illustration. " + prompt
+
+    response = await client.aio.models.generate_content(
+        model="nano-banana-pro-preview",
+        contents=full_prompt,
+        config=types.GenerateContentConfig(response_modalities=["image", "text"])
     )
-    chat.with_model("gemini", "gemini-3-pro-image-preview").with_params(modalities=["image", "text"])
-    
-    msg = UserMessage(text=prompt)
-    text, images = await chat.send_message_multimodal_response(msg)
-    
-    if images:
-        img_data = base64.b64decode(images[0]['data'])
-        img_path = IMAGES_DIR / f"{book_id}_{image_name}.png"
-        with open(img_path, "wb") as f:
-            f.write(img_data)
-        return str(img_path), base64.b64encode(img_data).decode('utf-8')[:50]
+
+    for part in response.candidates[0].content.parts:
+        if part.inline_data and part.inline_data.mime_type.startswith("image/"):
+            img_data = part.inline_data.data
+            img_path = IMAGES_DIR / f"{book_id}_{image_name}.png"
+            with open(img_path, "wb") as f:
+                f.write(img_data)
+            return str(img_path), base64.b64encode(img_data).decode("utf-8")[:50]
     return None, None
 
 async def generate_stock_search_query(chapter_title, chapter_content, book_title):
