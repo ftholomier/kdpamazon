@@ -3,19 +3,21 @@ import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   BookOpen, Download, Loader2, ArrowLeft, Eye, Image as ImageIcon,
-  FileText, ChevronDown, ChevronUp, CheckCircle, PenTool, Trash2, RefreshCw
+  FileText, ChevronDown, ChevronUp, CheckCircle, PenTool, Trash2, RefreshCw,
+  Copy, Sparkles, ClipboardCheck, Tag, AlignLeft, Type, Hash
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import {
   getBook, getBookProgress, generateChapter, generateChapterImage,
-  deleteChapterImage, exportBook
+  deleteChapterImage, exportBook, generateKdpMetadata, getKdpMetadata
 } from "@/lib/api";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -37,6 +39,11 @@ export default function BookDetail() {
   const [deletingImage, setDeletingImage] = useState(null);
   const [expandedChapter, setExpandedChapter] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
+  const [kdpMetadata, setKdpMetadata] = useState(null);
+  const [generatingMetadata, setGeneratingMetadata] = useState(false);
+  const [copiedField, setCopiedField] = useState(null);
+
+  const is_fr = book?.language === "fr";
 
   const fetchBook = useCallback(async () => {
     try {
@@ -53,6 +60,14 @@ export default function BookDetail() {
   useEffect(() => {
     fetchBook();
   }, [fetchBook]);
+
+  // Load existing KDP metadata
+  useEffect(() => {
+    if (!book) return;
+    getKdpMetadata(bookId).then(data => {
+      if (data.metadata) setKdpMetadata(data.metadata);
+    }).catch(() => {});
+  }, [book?.status, bookId]); // eslint-disable-line
 
   useEffect(() => {
     if (!book || book.status !== "writing") return;
@@ -132,6 +147,41 @@ export default function BookDetail() {
     }
   };
 
+  const handleGenerateKdpMetadata = async () => {
+    setGeneratingMetadata(true);
+    try {
+      const data = await generateKdpMetadata(bookId);
+      if (data.metadata) {
+        setKdpMetadata(data.metadata);
+        toast.success(is_fr ? "Fiche KDP generee !" : "KDP listing generated!");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to generate KDP metadata");
+    } finally {
+      setGeneratingMetadata(false);
+    }
+  };
+
+  const handleCopy = async (field, value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      toast.success(is_fr ? "Copie !" : "Copied!");
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      // Fallback for non-HTTPS
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopiedField(field);
+      toast.success(is_fr ? "Copie !" : "Copied!");
+      setTimeout(() => setCopiedField(null), 2000);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -145,7 +195,6 @@ export default function BookDetail() {
   const chapters = (book.chapters || []).sort((a, b) => a.chapter_number - b.chapter_number);
   const outline = book.outline || [];
   const progress = chapters.length / Math.max(outline.length, 1);
-  const is_fr = book.language === "fr";
 
   // Book preview mode
   if (previewMode) {
@@ -516,6 +565,219 @@ export default function BookDetail() {
           );
         })}
       </div>
+
+      {/* ====== KDP LISTING METADATA ====== */}
+      {chapters.length > 0 && (
+        <div className="mt-12" data-testid="kdp-metadata-section">
+          <Separator className="mb-10 bg-white/5" />
+          
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <p className="text-xs font-mono tracking-widest uppercase text-indigo-400/60 mb-2">
+                Amazon KDP
+              </p>
+              <h2 className="text-2xl font-light tracking-tight text-white" style={{ fontFamily: "'Fraunces', serif" }}>
+                {is_fr ? "Fiche du livre" : "Book Listing"}
+              </h2>
+              <p className="text-white/40 text-sm mt-1">
+                {is_fr
+                  ? "Contenu optimise pour remplir la fiche Amazon KDP"
+                  : "Optimized content for your Amazon KDP listing"}
+              </p>
+            </div>
+            <Button
+              onClick={handleGenerateKdpMetadata}
+              disabled={generatingMetadata}
+              data-testid="generate-kdp-metadata-btn"
+              className="bg-indigo-500 hover:bg-indigo-600 text-white h-10 px-6 glow-button"
+            >
+              {generatingMetadata ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {is_fr ? "Generation..." : "Generating..."}
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  {kdpMetadata
+                    ? (is_fr ? "Regenerer la fiche" : "Regenerate listing")
+                    : (is_fr ? "Generer la fiche KDP" : "Generate KDP listing")}
+                </>
+              )}
+            </Button>
+          </div>
+
+          {kdpMetadata ? (
+            <div className="space-y-5 opacity-0 animate-fade-in-up" style={{ animationFillMode: "forwards" }}>
+              {/* Title */}
+              <KdpField
+                icon={Type}
+                label={is_fr ? "Titre du livre" : "Book Title"}
+                sublabel={`${kdpMetadata.title?.length || 0} / 200 ${is_fr ? "caracteres" : "characters"}`}
+                value={kdpMetadata.title || ""}
+                fieldKey="title"
+                copiedField={copiedField}
+                onCopy={handleCopy}
+              />
+
+              {/* Subtitle */}
+              <KdpField
+                icon={AlignLeft}
+                label={is_fr ? "Sous-titre" : "Subtitle"}
+                sublabel={`${kdpMetadata.subtitle?.length || 0} / 200 ${is_fr ? "caracteres" : "characters"}`}
+                value={kdpMetadata.subtitle || ""}
+                fieldKey="subtitle"
+                copiedField={copiedField}
+                onCopy={handleCopy}
+              />
+
+              {/* Description */}
+              <KdpField
+                icon={FileText}
+                label={is_fr ? "Description (3000 car.)" : "Description (3000 chars)"}
+                sublabel={`${kdpMetadata.description?.length || 0} / 3000 ${is_fr ? "caracteres" : "characters"}`}
+                value={kdpMetadata.description || ""}
+                fieldKey="description"
+                copiedField={copiedField}
+                onCopy={handleCopy}
+                multiline
+              />
+
+              {/* Keywords */}
+              <Card className="rounded-xl border border-white/5 bg-[#121212]/50 p-6" data-testid="kdp-field-keywords">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-3 flex-1">
+                    <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center mt-0.5 flex-shrink-0">
+                      <Hash className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-white text-sm font-medium">
+                          {is_fr ? "7 Mots-cles" : "7 Keywords"}
+                        </h4>
+                        <span className="text-[10px] font-mono text-white/30">
+                          {kdpMetadata.keywords?.length || 0} / 7
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {(kdpMetadata.keywords || []).map((kw, i) => (
+                          <div
+                            key={i}
+                            className="group/kw flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:border-indigo-500/30 transition-all cursor-pointer"
+                            onClick={() => handleCopy(`keyword-${i}`, kw)}
+                            data-testid={`kdp-keyword-${i}`}
+                          >
+                            <span className="text-sm text-white/70">{kw}</span>
+                            {copiedField === `keyword-${i}` ? (
+                              <ClipboardCheck className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3 text-white/20 group-hover/kw:text-white/50 transition-colors" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleCopy("keywords-all", (kdpMetadata.keywords || []).join(", "))}
+                    data-testid="copy-all-keywords-btn"
+                    className="text-white/30 hover:text-white h-9 px-3 flex-shrink-0"
+                  >
+                    {copiedField === "keywords-all" ? (
+                      <ClipboardCheck className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 mr-1.5" />
+                        <span className="text-xs">{is_fr ? "Tout copier" : "Copy all"}</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </Card>
+
+              {/* Back Cover */}
+              <KdpField
+                icon={BookOpen}
+                label={is_fr ? "4eme de couverture" : "Back Cover"}
+                sublabel={`${kdpMetadata.back_cover?.length || 0} ${is_fr ? "caracteres" : "characters"}`}
+                value={kdpMetadata.back_cover || ""}
+                fieldKey="back_cover"
+                copiedField={copiedField}
+                onCopy={handleCopy}
+                multiline
+                accentColor="purple"
+              />
+            </div>
+          ) : !generatingMetadata ? (
+            <Card className="rounded-xl border border-white/5 bg-[#121212]/50 p-10 text-center" data-testid="kdp-empty-state">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-4">
+                <Tag className="w-7 h-7 text-indigo-400/50" />
+              </div>
+              <h3 className="text-white/50 text-lg mb-2" style={{ fontFamily: "'Fraunces', serif" }}>
+                {is_fr ? "Fiche KDP non generee" : "KDP listing not generated"}
+              </h3>
+              <p className="text-white/25 text-sm max-w-md mx-auto">
+                {is_fr
+                  ? "Cliquez sur 'Generer la fiche KDP' pour creer automatiquement le titre, la description, les mots-cles et la 4eme de couverture."
+                  : "Click 'Generate KDP listing' to automatically create the title, description, keywords and back cover text."}
+              </p>
+            </Card>
+          ) : null}
+        </div>
+      )}
     </div>
+  );
+}
+
+/* ====== KDP FIELD COMPONENT ====== */
+function KdpField({ icon: Icon, label, sublabel, value, fieldKey, copiedField, onCopy, multiline = false, accentColor = "indigo" }) {
+  const colorMap = {
+    indigo: "bg-indigo-500/10 text-indigo-400",
+    purple: "bg-purple-500/10 text-purple-400",
+    amber: "bg-amber-500/10 text-amber-400",
+  };
+  const iconStyle = colorMap[accentColor] || colorMap.indigo;
+
+  return (
+    <Card className="rounded-xl border border-white/5 bg-[#121212]/50 p-6" data-testid={`kdp-field-${fieldKey}`}>
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center mt-0.5 flex-shrink-0 ${iconStyle.split(" ")[0]}`}>
+            <Icon className={`w-4 h-4 ${iconStyle.split(" ")[1]}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <h4 className="text-white text-sm font-medium">{label}</h4>
+              <span className="text-[10px] font-mono text-white/30">{sublabel}</span>
+            </div>
+            {multiline ? (
+              <p className="text-white/60 text-sm leading-relaxed whitespace-pre-line mt-2 pr-4">
+                {value}
+              </p>
+            ) : (
+              <p className="text-white/80 text-base mt-1">{value}</p>
+            )}
+          </div>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onCopy(fieldKey, value)}
+          data-testid={`copy-${fieldKey}-btn`}
+          className="text-white/30 hover:text-white h-9 px-3 flex-shrink-0"
+        >
+          {copiedField === fieldKey ? (
+            <ClipboardCheck className="w-4 h-4 text-emerald-400" />
+          ) : (
+            <>
+              <Copy className="w-4 h-4 mr-1.5" />
+              <span className="text-xs">Copier</span>
+            </>
+          )}
+        </Button>
+      </div>
+    </Card>
   );
 }

@@ -34,4 +34,8 @@ export const deleteChapterImage = (bookId, chapterNum) => api.delete(`/books/${b
 export const exportBook = (bookId, format) => 
   api.post(`/books/${bookId}/export`, { book_id: bookId, format }, { responseType: 'blob' }).then(r => r);
 
+// KDP Metadata
+export const generateKdpMetadata = (bookId) => api.post(`/books/${bookId}/generate-kdp-metadata`).then(r => r.data);
+export const getKdpMetadata = (bookId) => api.get(`/books/${bookId}/kdp-metadata`).then(r => r.data);
+
 export default api;
