@@ -846,6 +846,113 @@ def strip_chapter_title_from_content(content, chapter_title):
     
     return '\n'.join(lines[start_idx:])
 
+
+# ====== KDP METADATA ROUTES ======
+
+@api_router.post("/books/{book_id}/generate-kdp-metadata")
+async def generate_kdp_metadata(book_id: str):
+    """Generate Amazon KDP listing metadata from the book content."""
+    book = await db.books.find_one({"id": book_id}, {"_id": 0})
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    chapters = book.get("chapters", [])
+    if not chapters:
+        raise HTTPException(status_code=400, detail="Book has no chapters yet")
+    
+    lang = book.get("language", "fr")
+    title = book.get("title", "")
+    subtitle = book.get("subtitle", "")
+    category = book.get("category", "")
+    
+    # Build a content summary from all chapters
+    content_summary_parts = []
+    for ch in sorted(chapters, key=lambda x: x.get("chapter_number", 0)):
+        ch_content = ch.get("content", "")
+        # Take first 300 chars of each chapter for context
+        content_summary_parts.append(f"Chapter {ch['chapter_number']} - {ch['title']}: {ch_content[:300]}")
+    content_summary = "\n".join(content_summary_parts)[:4000]
+    
+    if lang == "fr":
+        prompt = f"""Tu es un expert en marketing de livres Amazon KDP. Analyse le contenu de ce livre et génère les métadonnées optimisées pour la fiche Amazon KDP.
+
+LIVRE :
+Titre actuel : {title}
+Sous-titre actuel : {subtitle}
+Catégorie : {category}
+Résumé du contenu :
+{content_summary}
+
+Génère un JSON avec les champs suivants :
+- "title": Un titre optimisé pour Amazon KDP (accrocheur, avec mots-clés, max 200 caractères)
+- "subtitle": Un sous-titre descriptif et vendeur (max 200 caractères)
+- "description": Une description commerciale de EXACTEMENT 2800-3000 caractères pour la fiche Amazon. Elle doit être engageante, structurée avec des paragraphes, mettre en avant les bénéfices pour le lecteur, inclure un appel à l'action. Ne pas utiliser de markdown, utiliser des retours à la ligne simples.
+- "keywords": Une liste de exactement 7 mots-clés stratégiques pour le référencement Amazon (chaque mot-clé peut contenir plusieurs mots)
+- "back_cover": Le texte de la 4ème de couverture (500-800 caractères). Accrocheur, donne envie de lire, résume la promesse du livre sans tout dévoiler.
+
+Réponds UNIQUEMENT avec le JSON valide, sans markdown ni backticks.
+Format: {{"title": "...", "subtitle": "...", "description": "...", "keywords": ["...", "...", ...], "back_cover": "..."}}"""
+    else:
+        prompt = f"""You are an Amazon KDP book marketing expert. Analyze this book's content and generate optimized metadata for the Amazon KDP listing.
+
+BOOK:
+Current title: {title}
+Current subtitle: {subtitle}
+Category: {category}
+Content summary:
+{content_summary}
+
+Generate a JSON with these fields:
+- "title": An optimized Amazon KDP title (catchy, with keywords, max 200 characters)
+- "subtitle": A descriptive, compelling subtitle (max 200 characters)
+- "description": A commercial description of EXACTLY 2800-3000 characters for the Amazon listing. It should be engaging, structured with paragraphs, highlight reader benefits, include a call to action. No markdown, use simple line breaks.
+- "keywords": A list of exactly 7 strategic keywords for Amazon SEO (each keyword can be multi-word)
+- "back_cover": Back cover text (500-800 characters). Catchy, makes people want to read, summarizes the book's promise without spoiling.
+
+Respond ONLY with valid JSON, no markdown or backticks.
+Format: {{"title": "...", "subtitle": "...", "description": "...", "keywords": ["...", "...", ...], "back_cover": "..."}}"""
+
+    try:
+        response = await call_gemini(prompt, "You are an Amazon KDP marketing expert. Always respond with valid JSON only.")
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            cleaned = cleaned.rsplit("```", 1)[0]
+        metadata = json.loads(cleaned)
+        
+        # Validate and clean
+        metadata["title"] = metadata.get("title", title)[:200]
+        metadata["subtitle"] = metadata.get("subtitle", subtitle)[:200]
+        metadata["description"] = metadata.get("description", "")[:3000]
+        keywords = metadata.get("keywords", [])
+        if isinstance(keywords, list):
+            metadata["keywords"] = keywords[:7]
+        else:
+            metadata["keywords"] = []
+        metadata["back_cover"] = metadata.get("back_cover", "")[:800]
+        
+        # Save to book
+        await db.books.update_one(
+            {"id": book_id},
+            {"$set": {"kdp_metadata": metadata, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        return {"metadata": metadata}
+    except json.JSONDecodeError:
+        logger.error(f"Failed to parse KDP metadata JSON: {response[:300]}")
+        raise HTTPException(status_code=500, detail="Failed to parse AI response")
+    except Exception as e:
+        logger.error(f"KDP metadata generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/books/{book_id}/kdp-metadata")
+async def get_kdp_metadata(book_id: str):
+    book = await db.books.find_one({"id": book_id}, {"_id": 0})
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return {"metadata": book.get("kdp_metadata")}
+
+
 # ====== EXPORT ROUTES ======
 
 @api_router.post("/books/{book_id}/export")

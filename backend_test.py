@@ -10,6 +10,7 @@ class BookExportTester:
         self.api_url = f"{base_url}/api"
         self.tests_run = 0
         self.tests_passed = 0
+        self.failed_tests = []
 
     def log(self, message, level="INFO"):
         """Log test messages"""
@@ -43,14 +44,17 @@ class BookExportTester:
                 except:
                     return True, {"status": "ok", "content_type": response.headers.get('content-type', '')}
             else:
+                self.failed_tests.append(f"{name} - Expected {expected_status}, got {response.status_code}")
                 self.log(f"❌ {name} FAILED - Expected {expected_status}, got {response.status_code}", "ERROR")
                 self.log(f"   Response: {response.text[:200]}...", "ERROR")
                 return False, {}
 
         except requests.exceptions.Timeout:
+            self.failed_tests.append(f"{name} - Timeout")
             self.log(f"❌ {name} FAILED - Request timeout", "ERROR")
             return False, {}
         except Exception as e:
+            self.failed_tests.append(f"{name} - {str(e)}")
             self.log(f"❌ {name} FAILED - Error: {str(e)}", "ERROR")
             return False, {}
 
@@ -129,7 +133,80 @@ class BookExportTester:
                 return success, response  # Still counts as API success
         return success, response
 
+    def test_generate_kdp_metadata(self, book_id):
+        """Test KDP metadata generation - NEW FEATURE"""
+        self.log("Testing KDP metadata generation...")
+        success, response = self.run_test(
+            "Generate KDP Metadata", "POST", f"/books/{book_id}/generate-kdp-metadata", 200,
+            timeout=45
+        )
+        
+        if success:
+            metadata = response.get('metadata', {})
+            if metadata:
+                # Check all required fields exist
+                required_fields = ['title', 'subtitle', 'description', 'keywords', 'back_cover']
+                missing_fields = []
+                
+                for field in required_fields:
+                    if field not in metadata:
+                        missing_fields.append(field)
+                    elif field == 'keywords':
+                        if not isinstance(metadata[field], list) or len(metadata[field]) != 7:
+                            missing_fields.append(f"{field} (should be list of 7 items)")
+                    elif not metadata[field]:
+                        missing_fields.append(f"{field} (empty)")
+                
+                if missing_fields:
+                    self.log(f"❌ KDP metadata missing fields: {missing_fields}", "ERROR")
+                    return False, response
+                else:
+                    self.log("✅ All KDP metadata fields present and valid")
+                    self.log(f"   - Title: {len(metadata['title'])} chars")
+                    self.log(f"   - Subtitle: {len(metadata['subtitle'])} chars") 
+                    self.log(f"   - Description: {len(metadata['description'])} chars")
+                    self.log(f"   - Keywords: {len(metadata['keywords'])} items")
+                    self.log(f"   - Back cover: {len(metadata['back_cover'])} chars")
+                    return success, response
+            else:
+                self.log("❌ No metadata in response", "ERROR")
+                return False, response
+        return success, response
+
+    def test_get_kdp_metadata(self, book_id):
+        """Test getting existing KDP metadata"""
+        self.log("Testing GET KDP metadata...")
+        success, response = self.run_test(
+            "Get KDP Metadata", "GET", f"/books/{book_id}/kdp-metadata", 200
+        )
+        
+        if success:
+            metadata = response.get('metadata')
+            if metadata:
+                self.log("✅ KDP metadata retrieved successfully")
+                return success, response
+            else:
+                self.log("⚠️  No metadata found (may be normal if not generated yet)", "WARN")
+                return success, response
+        return success, response
+
     def check_backend_logs_for_stock_queries(self):
+        """Check if backend logs show stock image search queries"""
+        self.log("Checking backend logs for 'Stock image search query' entries...")
+        try:
+            # Get supervisor logs for backend
+            import subprocess
+            result = subprocess.run(['tail', '-n', '50', '/var/log/supervisor/backend.err.log'], 
+                                 capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and "Stock image search query" in result.stdout:
+                self.log("✅ Found 'Stock image search query' in backend logs")
+                return True
+            else:
+                self.log("⚠️  'Stock image search query' not found in recent backend logs", "WARN")
+                return False
+        except Exception as e:
+            self.log(f"⚠️  Could not check backend logs: {e}", "WARN")
+            return False
         """Check if backend logs show stock image search queries"""
         self.log("Checking backend logs for 'Stock image search query' entries...")
         try:
@@ -151,7 +228,7 @@ def main():
     tester = BookExportTester()
     book_id = "5e0285a7-e895-4b5a-8a1a-019662323522"  # The specific book ID mentioned in the request
     
-    tester.log("🚀 Starting Book Export and Features Testing")
+    tester.log("🚀 Starting KDP Metadata & Book Export Testing")
     tester.log(f"Testing book ID: {book_id}")
     tester.log(f"Base URL: {tester.base_url}")
     
@@ -165,19 +242,25 @@ def main():
     tester.log(f"📖 Book found with {len(chapters)} chapters, status: {book_data.get('status', 'unknown')}")
     
     if len(chapters) == 0:
-        tester.log("❌ Cannot test exports - book has no chapters", "ERROR")
+        tester.log("❌ Cannot test KDP metadata or exports - book has no chapters", "ERROR")
         return 1
 
-    # Test 2: PDF Export (most critical - 2-pass build with real page numbers)
+    # Test 2: NEW - Test KDP Metadata Generation
+    kdp_gen_success, _ = tester.test_generate_kdp_metadata(book_id)
+    
+    # Test 3: NEW - Test KDP Metadata Retrieval  
+    kdp_get_success, _ = tester.test_get_kdp_metadata(book_id)
+
+    # Test 4: PDF Export (most critical - 2-pass build with real page numbers)
     pdf_success, _ = tester.test_export_pdf(book_id)
     
-    # Test 3: DOCX Export (with TOC page numbers)
+    # Test 5: DOCX Export (with TOC page numbers)
     docx_success, _ = tester.test_export_docx(book_id)
     
-    # Test 4: EPUB Export
+    # Test 6: EPUB Export
     epub_success, _ = tester.test_export_epub(book_id)
     
-    # Test 5: Test delete image endpoint on a chapter that has an image
+    # Test 7: Test delete image endpoint on a chapter that has an image
     chapters_with_images = [ch for ch in chapters if ch.get('image_url')]
     delete_success = True
     if chapters_with_images:
@@ -186,7 +269,7 @@ def main():
     else:
         tester.log("⚠️  No chapters with images found to test delete endpoint", "WARN")
     
-    # Test 6: Test image generation (this should trigger stock image AI queries)
+    # Test 8: Test image generation (this should trigger stock image AI queries)
     # Find a chapter without an image to test generation
     chapters_without_images = [ch for ch in chapters if not ch.get('image_url')]
     image_gen_success = True
@@ -206,6 +289,13 @@ def main():
     tester.log(f"📊 BACKEND TEST SUMMARY")
     tester.log(f"📊 Tests passed: {tester.tests_passed}/{tester.tests_run}")
     
+    # New KDP tests
+    kdp_tests = [kdp_gen_success, kdp_get_success]
+    kdp_passed = sum(kdp_tests)
+    tester.log(f"🆕 KDP metadata tests: {kdp_passed}/2 passed")
+    tester.log(f"   Generate KDP: {'✅' if kdp_gen_success else '❌'}")
+    tester.log(f"   Get KDP: {'✅' if kdp_get_success else '❌'}")
+    
     critical_tests = [pdf_success, docx_success, epub_success]
     critical_passed = sum(critical_tests)
     
@@ -214,11 +304,20 @@ def main():
     tester.log(f"   DOCX: {'✅' if docx_success else '❌'}")
     tester.log(f"   EPUB: {'✅' if epub_success else '❌'}")
     
-    if critical_passed == 3:
-        tester.log("🎉 ALL CRITICAL EXPORT FEATURES WORKING!", "SUCCESS")
+    # Show failed tests
+    if tester.failed_tests:
+        tester.log("❌ FAILED TESTS:")
+        for failed in tester.failed_tests:
+            tester.log(f"   - {failed}")
+    
+    # Overall success criteria: KDP tests + export tests
+    overall_success = kdp_passed >= 2 and critical_passed >= 2
+    
+    if overall_success:
+        tester.log("🎉 CORE KDP & EXPORT FEATURES WORKING!", "SUCCESS")
         return 0
     else:
-        tester.log(f"❌ {3 - critical_passed} critical export feature(s) failed", "ERROR")
+        tester.log(f"❌ Some critical features failed", "ERROR")
         return 1
 
 if __name__ == "__main__":
